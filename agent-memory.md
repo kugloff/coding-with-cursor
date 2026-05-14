@@ -1,3 +1,6 @@
+This file is the implementation log (source of truth for what was actually built).
+It must NOT describe intended features, only implemented changes.
+
 # Agent memory (implementation changelog)
 
 **Rules**
@@ -54,3 +57,26 @@
 
 - Added **`agent-memory.md`** (this file) with append-only changelog rules and baseline + session entries.
 - Restructured **`README.md`** into TOC-driven **application documentation** (overview, quick start, configuration, user guide, API reference, project layout, build/deploy, security, troubleshooting, contributor/AI notes) and linked to **`agent-memory.md`** for implementation history.
+
+### 2026-05-14 — Documentation maintenance policy (process)
+
+- Update **`README.md`** only when **behavior or spec** changes (intended product/API/workspace behavior as the system specification).
+- Append **`agent-memory.md`** only for **actual code changes** (including shipped config the code reads, if it materially changes behavior).
+- **Do not** duplicate the same information in both files; keep spec/user-facing behavior in **`README.md`**, keep what was built/changed in **`agent-memory.md`**.
+- If unsure where something belongs, **prefer `agent-memory.md`** for implementation-level detail and keep **`README.md`** to behavior/spec without repeating that detail.
+
+### 2026-05-14 — Browser `localStorage` workspace persistence
+
+- Added **`client/src/workspaceStorage.js`**: `WORKSPACE_LOCAL_STORAGE_KEY` (`llm:workspace:v1`), `loadPersistedWorkspace()`, `persistWorkspace()`, `clearPersistedWorkspace()`; load filters keys with **`isValidJsWorkspaceFilename`**; invalid/missing storage → caller uses **`DEFAULT_FILES`**.
+- **`App.jsx`**: initial `useState` hydrates from `loadPersistedWorkspace()`; `useEffect` on **`workspace`** calls **`persistWorkspace`** (React state remains source of truth); **`handleResetWorkspace`** clears storage, restores **`DEFAULT_FILES`** / **`main.js`**, clears undo/redo refs, bumps **`editorNonce`**, closes AI preview, clears run output state.
+- **Undo/redo:** stacks stay in-memory only (not serialized); reset clears both stacks; normal undo/redo unchanged by persistence writes.
+- **UI:** top bar **Reset** button (`RotateCcw`); **`App.css`** `.workspace__history-btn--reset`; **`FileExplorer.jsx`** note text updated for persistence.
+
+### 2026-05-14 — Dual-mode AI chat (`POST /chat`: Chat vs Agent)
+
+- **`server/chatBody.js`**: `normalizeChatMode` — only the string **`"agent"`** (trimmed, case-insensitive) selects agent; anything else (including missing) → **`"chat"`**.
+- **`server/index.js`**: reads **`body.mode`**, passes normalized **`mode`** into **`generateResponse`**, JSON body includes echoed **`mode`**.
+- **`server/services/geminiService.js`**: **`CHAT_MODE_RULES`** / **`AGENT_MODE_RULES`** replace the prior single response-format block; **`buildPromptWithFileContext(..., mode)`**; **`generateResponse`** — **chat** returns trimmed text with **`toolCall: null`** (skips **`parseAssistantModelOutput`**); **agent** parses with **`assistantOutput.js`** and requires a non-null **`toolCall`** or throws **`GeminiApiError`**.
+- **`client/src/components/ChatPanel.jsx`**: header mode toggle; every **`POST /chat`** body includes **`mode`**; applies **`onAiEditProposal`** only when **`data.mode === "agent"`** (ignores **`toolCall`** in chat).
+- **`client/src/App.css`**: **`.chat-panel__header`**, mode toggle / active button styles.
+- **`README.md`**: user guide + **`POST /chat`** spec updated for **`mode`**, Chat vs Agent behavior, and response shape.

@@ -7,6 +7,7 @@ import {
   PanelsTopLeft,
   Play,
   Redo2,
+  RotateCcw,
   Sparkles,
   Undo2,
 } from "lucide-react";
@@ -24,6 +25,11 @@ import {
   validateWorkspaceExistingPath,
   validateWorkspaceRenameTarget,
 } from "./workspaceFileValidation.js";
+import {
+  clearPersistedWorkspace,
+  loadPersistedWorkspace,
+  persistWorkspace,
+} from "./workspaceStorage.js";
 
 const DEFAULT_FILES = {
   "main.js": `// Welcome — edit freely
@@ -60,9 +66,10 @@ function cloneWorkspace(w) {
 }
 
 export default function App() {
-  const [workspace, setWorkspace] = useState({
-    files: { ...DEFAULT_FILES },
-    activePath: "main.js",
+  const [workspace, setWorkspace] = useState(() => {
+    const loaded = loadPersistedWorkspace();
+    if (loaded) return loaded;
+    return { files: { ...DEFAULT_FILES }, activePath: "main.js" };
   });
   const [editorNonce, setEditorNonce] = useState(0);
   /** Pending AI `edit_file` — side-by-side diff before apply. */
@@ -84,6 +91,10 @@ export default function App() {
   const workspaceRef = useRef(workspace);
   useEffect(() => {
     workspaceRef.current = workspace;
+  }, [workspace]);
+
+  useEffect(() => {
+    persistWorkspace(workspace);
   }, [workspace]);
 
   useEffect(() => {
@@ -139,6 +150,27 @@ export default function App() {
     resetManualEditGroup();
     setWorkspace(nextState);
     setEditorNonce((n) => n + 1);
+  }, [bumpHistoryUi, resetManualEditGroup]);
+
+  const handleResetWorkspace = useCallback(() => {
+    if (
+      !window.confirm(
+        "Reset workspace to default files? This removes the saved copy in this browser and clears undo/redo.",
+      )
+    ) {
+      return;
+    }
+    clearPersistedWorkspace();
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    bumpHistoryUi();
+    resetManualEditGroup();
+    setWorkspace({ files: { ...DEFAULT_FILES }, activePath: "main.js" });
+    setEditorNonce((n) => n + 1);
+    setAiEditPreview(null);
+    setRunOutput("");
+    setRunError("");
+    setRunOutputMinimized(false);
   }, [bumpHistoryUi, resetManualEditGroup]);
 
   const showAiEditToast = useCallback((message) => {
@@ -365,6 +397,15 @@ export default function App() {
             >
               <Redo2 size={14} strokeWidth={2} aria-hidden />
               Redo
+            </button>
+            <button
+              type="button"
+              className="workspace__history-btn workspace__history-btn--reset"
+              onClick={handleResetWorkspace}
+              title="Clear browser save and restore default workspace (undo history cleared)"
+            >
+              <RotateCcw size={14} strokeWidth={2} aria-hidden />
+              Reset
             </button>
           </div>
           <span className="workspace__meta">

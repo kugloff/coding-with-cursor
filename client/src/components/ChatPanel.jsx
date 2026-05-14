@@ -10,6 +10,7 @@ export default function ChatPanel({
 }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [chatMode, setChatMode] = useState("chat");
   const [pending, setPending] = useState(false);
   const listRef = useRef(null);
   const messageIdRef = useRef(0);
@@ -40,6 +41,7 @@ export default function ChatPanel({
         message: text,
         files,
         currentFile: currentFile ?? null,
+        mode: chatMode,
       };
 
       const res = await fetch("/chat", {
@@ -68,6 +70,9 @@ export default function ChatPanel({
         throw new Error("Invalid response from server (response must be a string)");
       }
 
+      const serverMode = data.mode === "agent" ? "agent" : "chat";
+      const allowStructuredTools = serverMode === "agent";
+
       const tool = data.toolCall;
       const isEditTool =
         tool &&
@@ -86,8 +91,9 @@ export default function ChatPanel({
         typeof tool.content === "string";
 
       const isFileProposal = isEditTool || isCreateTool;
+      const isAgentFileProposal = allowStructuredTools && isFileProposal;
 
-      if (isFileProposal) {
+      if (isAgentFileProposal) {
         onAiEditProposal?.(tool);
       }
 
@@ -95,11 +101,11 @@ export default function ChatPanel({
 
       let assistantBody = textPart;
 
-      if (isCreateTool) {
+      if (isCreateTool && isAgentFileProposal) {
         const name = tool.filename.trim();
         const prefix = `Proposed new file \`${name}\` — open the diff dialog (empty original if the file is new), then Accept or Reject.`;
         assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
-      } else if (isEditTool) {
+      } else if (isEditTool && isAgentFileProposal) {
         const edited = tool.filename.trim();
         const prefix = `Proposed changes for \`${edited}\` — open the diff dialog to compare original vs new code, then choose Accept or Reject.`;
         assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
@@ -118,14 +124,54 @@ export default function ChatPanel({
 
   return (
     <div className="chat-panel">
+      <div className="chat-panel__header">
+        <span className="chat-panel__mode-caption" id="chat-mode-caption">
+          {chatMode === "agent" ? "Agent mode" : "Chat mode"}
+        </span>
+        <div
+          className="chat-panel__mode-toggle"
+          role="group"
+          aria-labelledby="chat-mode-caption"
+        >
+          <button
+            type="button"
+            className={`chat-panel__mode-btn${chatMode === "chat" ? " chat-panel__mode-btn--active" : ""}`}
+            onClick={() => setChatMode("chat")}
+            disabled={pending || diffPreviewOpen}
+            aria-pressed={chatMode === "chat"}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            className={`chat-panel__mode-btn${chatMode === "agent" ? " chat-panel__mode-btn--active" : ""}`}
+            onClick={() => setChatMode("agent")}
+            disabled={pending || diffPreviewOpen}
+            aria-pressed={chatMode === "agent"}
+          >
+            Agent
+          </button>
+        </div>
+      </div>
       <div className="chat-panel__thread" ref={listRef} role="log" aria-live="polite">
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
-            Cursor-style chat: ask about your JavaScript workspace (every tab is a <code>.js</code> file). The model may return{" "}
-            <code>edit_file</code> / <code>create_file</code> JSON for <code>.js</code> paths only — a side-by-side diff opens first; nothing is saved until you accept. Each request sends the{" "}
-            <strong>project file list</strong>, the <strong>active file name</strong>, and{" "}
-            <strong>full file contents</strong> (within server limits). Set <code>GEMINI_API_KEY</code> in{" "}
-            <code>server/.env</code>.
+            {chatMode === "chat" ? (
+              <>
+                <strong>Chat mode</strong> — the assistant answers in natural language only; it does not apply file edits
+                or return structured tool JSON. You can still discuss your JavaScript workspace (every tab is a{" "}
+                <code>.js</code> file). Each request sends the <strong>project file list</strong>, the{" "}
+                <strong>active file name</strong>, and <strong>full file contents</strong> (within server limits). Set{" "}
+                <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
+              </>
+            ) : (
+              <>
+                <strong>Agent mode</strong> — the model returns only <code>edit_file</code> / <code>create_file</code>{" "}
+                JSON for valid <code>.js</code> names; a side-by-side diff opens first and nothing is saved until you
+                accept. Describe the change you want in plain language; the reply will not include conversational prose.
+                Same workspace context is sent as in Chat mode.
+              </>
+            )}
           </p>
         )}
         {messages.map((msg) => (
@@ -177,7 +223,11 @@ export default function ChatPanel({
             id="chat-input"
             className="chat-panel__input"
             rows={1}
-            placeholder="Ask AI — Enter to send · Shift+Enter newline"
+            placeholder={
+              chatMode === "agent"
+                ? "Describe the edit — Enter to send · Shift+Enter newline"
+                : "Ask AI — Enter to send · Shift+Enter newline"
+            }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

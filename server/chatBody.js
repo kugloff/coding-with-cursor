@@ -1,6 +1,16 @@
 import { workspaceChatFileKeyErrorDetail } from "./workspaceFileValidation.js";
 
 /**
+ * @param {unknown} mode
+ * @returns {"chat" | "agent"}
+ */
+export function normalizeChatMode(mode) {
+  if (typeof mode !== "string") return "chat";
+  const t = mode.trim().toLowerCase();
+  return t === "agent" ? "agent" : "chat";
+}
+
+/**
  * Validates optional `files` and `currentFile` from POST /chat JSON body.
  * @param {unknown} files
  * @param {unknown} currentFile

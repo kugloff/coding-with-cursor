@@ -1,18 +1,25 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { parseAssistantModelOutput } from "../assistantOutput.js";
 
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-2.5-flash-lite";
 
-const RESPONSE_FORMAT_RULES = `How to format your reply:
-- This workspace is JavaScript-only: every file path ends with ".js" and file bodies must be plain JavaScript (no TypeScript, JSX, Python, HTML-only modules, etc.). If the user asks for another language, answer in plain text and either translate the idea into JavaScript for a .js file or explain why you cannot — do not use create_file/edit_file with non-.js names or non-JS syntax.
-- For explanations, questions, or chat: respond with plain text only (do not wrap in JSON).
-- To replace an entire existing file, respond with ONLY a single JSON object and nothing else (no markdown fences, no prose). Shape:
+const CHAT_MODE_RULES = `CHAT MODE — read-only assistant (no workspace writes via this API):
+- Reply in natural language only. Do NOT output edit_file or create_file JSON, and do NOT output any JSON object meant as a machine action.
+- You may use normal Markdown (including fenced code blocks) only to explain or illustrate ideas. Code in fences is for discussion; it does not modify the user's files.
+- This workspace is JavaScript-only (.js file tabs). Use the provided file contents to answer questions, suggest refactors, or explain behavior in prose.
+- Never pretend you have applied edits to the repository; the user applies changes manually unless a different product mode is used.`;
+
+const AGENT_MODE_RULES = `AGENT MODE — workspace editing agent (structured output only):
+- Output MUST be exactly one JSON object and nothing else: no prose before or after, no markdown fences, no commentary, no labels.
+- This workspace is JavaScript-only: every path ends with ".js"; file bodies in "content" must be plain JavaScript only.
+- To replace an entire existing file, use ONLY:
   {"action":"edit_file","filename":"<path>","content":"<full new file text>"}
-  Use "edit_file" when the path already exists in the project file list (or you are overwriting the active file). The "filename" must match an exact path from the list (or the active file path) and MUST end with ".js".
-- To add a new file that does not exist yet, use ONLY this shape:
+  "filename" must match an exact path from the project file list (or the active file path) and MUST end with ".js".
+- To add a new file, use ONLY:
   {"action":"create_file","filename":"<name>.js","content":"<full new file text>"}
-  The filename MUST end with ".js" (simple basename only: no slashes or backslashes). Do not use "create_file" for paths that already exist — use "edit_file" instead.
-- The "content" value must be a valid JSON string (escape quotes, newlines, etc.).`;
+  Filename MUST end with ".js" (single basename: no slashes or backslashes). If the path already exists, use edit_file instead.
+- "content" must be a valid JSON string (escape quotes, newlines, etc.).
+- Do not include any text outside the single JSON object.`;
 
 /** Total characters of file bodies included in the prompt (soft cap). */
 const MAX_CONTEXT_CHARS = 200_000;
@@ -70,9 +77,10 @@ function appendFileBody(parts, raw, budget) {
 /**
  * @param {Record<string, string>} files
  * @param {string | null | undefined} currentFile
+ * @param {"chat" | "agent"} mode
  * @returns {string}
  */
-function buildPromptWithFileContext(message, files, currentFile) {
+function buildPromptWithFileContext(message, files, currentFile, mode) {
   const fileMap = files && typeof files === "object" && !Array.isArray(files) ? files : {};
   const pathsSorted = Object.keys(fileMap)
     .filter((p) => typeof fileMap[p] === "string")
@@ -83,17 +91,26 @@ function buildPromptWithFileContext(message, files, currentFile) {
 
   const parts = [];
 
-  parts.push(
-    "You are a helpful coding assistant. The user is working in a web-based editor with multiple in-memory files.",
-    "STRICT RULE: The virtual workspace only contains JavaScript modules. Every path ends with .js; all file bodies you propose via edit_file or create_file must be valid JavaScript only.",
-    "Use the sections below to answer questions about their code, suggest refactors, find bugs, or explain behavior.",
-    "The ACTIVE editor file is named explicitly; treat the user's question as about that file unless they clearly refer to another path from the project list.",
-    "If a file is truncated, say so briefly if it affects your answer.",
-    ""
-  );
+  if (mode === "agent") {
+    parts.push(
+      "You are a workspace editing agent for a web-based JavaScript editor.",
+      "Your ONLY task is to output exactly one JSON object: either edit_file or create_file, per the AGENT MODE rules at the end. No prose, no markdown fences, no explanations.",
+      "The client will parse your entire reply as that single JSON value.",
+      ""
+    );
+  } else {
+    parts.push(
+      "You are a helpful coding assistant in CHAT MODE. The user is working in a web-based editor with multiple in-memory .js files.",
+      "You must NOT output edit_file, create_file, or any other machine-action JSON. Answer in natural language only; use Markdown (including fenced code) only to explain.",
+      "Use the sections below to answer questions about their code, suggest refactors, find bugs, or explain behavior.",
+      "The ACTIVE editor file is named explicitly; treat the user's question as about that file unless they clearly refer to another path from the project list.",
+      "If a file is truncated, say so briefly if it affects your answer.",
+      ""
+    );
+  }
 
   parts.push(
-    "--- Project file list (exact paths; use these strings for edit_file.filename) ---",
+    "--- Project file list (exact paths; use these strings for edit_file.filename when in agent mode) ---",
     pathsSorted.length ? pathsSorted.join(", ") : "(no files in workspace payload)",
     ""
   );
@@ -129,23 +146,31 @@ function buildPromptWithFileContext(message, files, currentFile) {
     }
   }
 
-  parts.push("--- User message ---", message.trim(), "", RESPONSE_FORMAT_RULES);
+  parts.push(
+    "--- User message ---",
+    message.trim(),
+    "",
+    mode === "agent" ? AGENT_MODE_RULES : CHAT_MODE_RULES
+  );
   return parts.join("\n");
 }
 
 /**
  * Calls Google Gemini with optional workspace file context.
- * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null }} input
+ * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null, mode?: "chat" | "agent" }} input
  *   `files` maps path → content (empty strings allowed). `currentFile` selects the active tab; its body is placed first in the prompt when present in `files`.
+ *   `mode` defaults to `"chat"`. In chat mode the reply is natural language only (`toolCall` always null). In agent mode the reply is parsed for `edit_file` / `create_file`.
  * @returns {Promise<{ response: string, toolCall: null | { action: "edit_file" | "create_file", filename: string, content: string } }>}
  */
-export async function generateResponse({ message, files, currentFile }) {
+export async function generateResponse({ message, files, currentFile, mode = "chat" }) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (typeof apiKey !== "string" || !apiKey.trim()) {
     throw new GeminiConfigurationError(
       "GEMINI_API_KEY is missing or empty. Set it in the environment before calling the API."
     );
   }
+
+  const modeNorm = mode === "agent" ? "agent" : "chat";
 
   const fileMap = files && typeof files === "object" && !Array.isArray(files) ? files : {};
   const hasAnyFileKeys = Object.keys(fileMap).some((k) => typeof fileMap[k] === "string");
@@ -154,8 +179,8 @@ export async function generateResponse({ message, files, currentFile }) {
   const hasContext = hasAnyFileKeys || hasActivePath;
 
   const prompt = hasContext
-    ? buildPromptWithFileContext(message, fileMap, currentFile)
-    : `${RESPONSE_FORMAT_RULES}\n\n--- User message ---\n${message.trim()}`;
+    ? buildPromptWithFileContext(message, fileMap, currentFile, modeNorm)
+    : `${modeNorm === "agent" ? AGENT_MODE_RULES : CHAT_MODE_RULES}\n\n--- User message ---\n${message.trim()}`;
 
   const genAI = new GoogleGenerativeAI(apiKey.trim());
   const model = genAI.getGenerativeModel({ model: MODEL_NAME });
@@ -185,12 +210,17 @@ export async function generateResponse({ message, files, currentFile }) {
     throw new GeminiApiError("Gemini returned empty text");
   }
 
-  const parsed = parseAssistantModelOutput(text);
-  if (!parsed.toolCall && !parsed.response.trim()) {
-    throw new GeminiApiError("Gemini returned empty text");
+  if (modeNorm === "chat") {
+    return { response: text.trim(), toolCall: null };
   }
 
-  return parsed;
+  const parsed = parseAssistantModelOutput(text);
+  if (parsed.toolCall) {
+    return parsed;
+  }
+  throw new GeminiApiError(
+    "Agent mode: expected a single edit_file or create_file JSON object with no surrounding text."
+  );
 }
 
 /**

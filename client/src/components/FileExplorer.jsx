@@ -164,7 +164,7 @@ export default function FileExplorer({
           New file
         </button>
       </div>
-      <p className="file-explorer__note">In-memory .js files only — refresh clears files.</p>
+      <p className="file-explorer__note">Tabs persist in this browser (localStorage) — Reset clears save.</p>
       <ul ref={listRef} className="file-explorer__list" aria-label="Files">
         {paths.length === 0 ? (
           <li className="file-explorer__empty">No files yet.</li>

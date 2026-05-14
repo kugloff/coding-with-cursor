@@ -6,7 +6,7 @@ import {
   GeminiConfigurationError,
   GeminiApiError,
 } from "./services/geminiService.js";
-import { parseChatContext } from "./chatBody.js";
+import { normalizeChatMode, parseChatContext } from "./chatBody.js";
 import { executeJavaScript, MAX_RUN_CODE_CHARS } from "./runCode.js";
 
 const app = express();
@@ -33,13 +33,14 @@ app.get("/api/hello", (_req, res) => {
 
 app.post("/chat", async (req, res) => {
   const body = req.body ?? {};
-  const { message, files: rawFiles, currentFile: rawCurrentFile } = body;
+  const { message, files: rawFiles, currentFile: rawCurrentFile, mode: rawMode } = body;
+  const mode = normalizeChatMode(rawMode);
 
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({
       error: "Invalid request body",
       detail:
-        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content, empty strings OK), "currentFile" (string | null, active editor path).',
+        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content, empty strings OK), "currentFile" (string | null, active editor path), "mode" ("chat" | "agent", default "chat").',
     });
   }
 
@@ -56,10 +57,12 @@ app.post("/chat", async (req, res) => {
       message: message.trim(),
       files: parsed.files,
       currentFile: parsed.currentFile,
+      mode,
     });
     return res.json({
       response: result.response ?? "",
       toolCall: result.toolCall ?? null,
+      mode,
     });
   } catch (err) {
     if (err instanceof GeminiConfigurationError) {
