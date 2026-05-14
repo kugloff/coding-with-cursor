@@ -1,40 +1,35 @@
-const PLACEHOLDER_FILES = [
-  { id: "app", label: "App.jsx", indent: 1 },
-  { id: "main", label: "main.jsx", indent: 1 },
-];
-
-export default function FileExplorer() {
+export default function FileExplorer({ paths, activePath, onSelect, onCreate }) {
   return (
     <div className="file-explorer">
-      <div className="file-explorer__hint">
-        <span className="file-explorer__badge">Placeholder</span>
-        <p>File tree will connect to your project later.</p>
+      <div className="file-explorer__toolbar">
+        <button type="button" className="file-explorer__new-btn" onClick={onCreate}>
+          New file
+        </button>
       </div>
-      <ul className="file-explorer__list" aria-label="File explorer (placeholder)">
-        <li className="file-explorer__row file-explorer__row--folder">
-          <span className="file-explorer__chevron" aria-hidden>
-            ▾
-          </span>
-          <span className="file-explorer__name">src</span>
-        </li>
-        {PLACEHOLDER_FILES.map((f) => (
-          <li
-            key={f.id}
-            className="file-explorer__row file-explorer__row--file"
-            style={{ paddingLeft: `${0.5 + f.indent * 0.75}rem` }}
-          >
-            <span className="file-explorer__icon" aria-hidden>
-              ◇
-            </span>
-            <span className="file-explorer__name">{f.label}</span>
-          </li>
-        ))}
-        <li className="file-explorer__row file-explorer__row--file">
-          <span className="file-explorer__icon" aria-hidden>
-            ◇
-          </span>
-          <span className="file-explorer__name">README.md</span>
-        </li>
+      <p className="file-explorer__note">In-memory only — refresh clears files.</p>
+      <ul className="file-explorer__list" aria-label="Files">
+        {paths.length === 0 ? (
+          <li className="file-explorer__empty">No files yet.</li>
+        ) : (
+          paths.map((path) => {
+            const isActive = path === activePath;
+            return (
+              <li key={path} className="file-explorer__item">
+                <button
+                  type="button"
+                  className={`file-explorer__file-btn${isActive ? " file-explorer__file-btn--active" : ""}`}
+                  onClick={() => onSelect(path)}
+                  aria-current={isActive ? "true" : undefined}
+                >
+                  <span className="file-explorer__file-icon" aria-hidden>
+                    ◇
+                  </span>
+                  <span className="file-explorer__file-name">{path}</span>
+                </button>
+              </li>
+            );
+          })
+        )}
       </ul>
     </div>
   );

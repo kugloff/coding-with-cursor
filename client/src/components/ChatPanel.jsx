@@ -1,10 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export default function ChatPanel() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const listRef = useRef(null);
+  const messageIdRef = useRef(0);
+
+  const appendMessage = useCallback((role, text) => {
+    messageIdRef.current += 1;
+    const id = messageIdRef.current;
+    setMessages((m) => [...m, { id, role, text }]);
+  }, []);
 
   useEffect(() => {
     const el = listRef.current;
@@ -18,7 +25,7 @@ export default function ChatPanel() {
     if (!text || pending) return;
 
     setInput("");
-    setMessages((m) => [...m, { role: "user", text }]);
+    appendMessage("user", text);
     setPending(true);
 
     try {
@@ -27,19 +34,31 @@ export default function ChatPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),
       });
-      const data = await res.json().catch(() => ({}));
+
+      let data = {};
+      const raw = await res.text();
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          throw new Error(raw.slice(0, 200) || `HTTP ${res.status}`);
+        }
+      }
+
       if (!res.ok) {
         const detail = typeof data.detail === "string" ? data.detail : null;
-        const errLabel = typeof data.error === "string" ? data.error : "Request failed";
+        const errLabel = typeof data.error === "string" ? data.error : `HTTP ${res.status}`;
         throw new Error(detail || errLabel);
       }
+
       if (typeof data.response !== "string") {
-        throw new Error("Invalid response from server");
+        throw new Error("Invalid response from server (missing response text)");
       }
-      setMessages((m) => [...m, { role: "assistant", text: data.response }]);
+
+      appendMessage("assistant", data.response);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      setMessages((m) => [...m, { role: "error", text: msg }]);
+      appendMessage("error", msg);
     } finally {
       setPending(false);
     }
@@ -48,21 +67,32 @@ export default function ChatPanel() {
   return (
     <div className="chat-panel">
       <div className="chat-panel__messages" ref={listRef} role="log" aria-live="polite">
-        {messages.length === 0 && (
+        {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
-            Ask about your code, refactors, or bugs. Requires <code>GEMINI_API_KEY</code> on
-            the server.
+            Messages are sent to <code>POST /chat</code> (proxied to Express). Set{" "}
+            <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
           </p>
         )}
-        {messages.map((msg, i) => (
-          <div
-            key={`${i}-${msg.role}`}
-            className={`chat-panel__bubble chat-panel__bubble--${msg.role}`}
+        {messages.map((msg) => (
+          <article
+            key={msg.id}
+            className={`chat-panel__turn chat-panel__turn--${msg.role}`}
+            aria-label={msg.role === "user" ? "You" : msg.role === "assistant" ? "Assistant" : "Error"}
           >
-            {msg.text}
-          </div>
+            <div className="chat-panel__turn-meta">
+              {msg.role === "user" && "You"}
+              {msg.role === "assistant" && "Assistant"}
+              {msg.role === "error" && "Error"}
+            </div>
+            <div className={`chat-panel__bubble chat-panel__bubble--${msg.role}`}>{msg.text}</div>
+          </article>
         ))}
-        {pending && <div className="chat-panel__bubble chat-panel__bubble--typing">…</div>}
+        {pending && (
+          <div className="chat-panel__turn chat-panel__turn--assistant" aria-busy="true">
+            <div className="chat-panel__turn-meta">Assistant</div>
+            <div className="chat-panel__bubble chat-panel__bubble--typing">Thinking…</div>
+          </div>
+        )}
       </div>
       <form className="chat-panel__form" onSubmit={handleSend}>
         <label className="visually-hidden" htmlFor="chat-input">
@@ -72,7 +102,7 @@ export default function ChatPanel() {
           id="chat-input"
           className="chat-panel__input"
           rows={2}
-          placeholder="Message…"
+          placeholder="Ask the assistant… (Enter to send, Shift+Enter for newline)"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {

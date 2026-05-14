@@ -14,10 +14,11 @@ const DEFAULT_OPTIONS = {
   tabSize: 2,
 };
 
-export default function CodeEditor({ value, onChange, language = "javascript" }) {
+export default function CodeEditor({ path, value, onChange, language = "javascript" }) {
   return (
     <div className="code-editor">
       <Editor
+        key={path || "__none__"}
         height="100%"
         language={language}
         theme="vs-dark"
