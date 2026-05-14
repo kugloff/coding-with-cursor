@@ -1,0 +1,53 @@
+:root {
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+
+  --text-primary: #e8eaef;
+  --text-muted: #9aa3b2;
+  --text-dim: #6b7280;
+
+  --bg-app: #08090c;
+  --bg-elevated: #0f1117;
+  --bg-pane: #0c0e12;
+  --bg-pane-header: rgba(255, 255, 255, 0.02);
+  --bg-pane-footer: #0a0c10;
+  --bg-inset: #06070a;
+  --bg-editor: #0d0f14;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --accent: #7dd3fc;
+  --accent-dim: #5eb8e5;
+  --accent-border: rgba(125, 211, 252, 0.45);
+  --accent-glow: rgba(125, 211, 252, 0.12);
+
+  --bubble-user-bg: rgba(125, 211, 252, 0.1);
+  --bubble-user-border: rgba(125, 211, 252, 0.22);
+  --bubble-ai-bg: rgba(255, 255, 255, 0.04);
+
+  --topbar-height: 40px;
+  --pane-header-height: 34px;
+  --width-explorer: 232px;
+  --width-chat: 340px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
