@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export default function ChatPanel() {
+export default function ChatPanel({ files = {}, currentFile = null, onToolCall }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
@@ -29,10 +29,16 @@ export default function ChatPanel() {
     setPending(true);
 
     try {
+      const payload = {
+        message: text,
+        files,
+        currentFile: currentFile ?? null,
+      };
+
       const res = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify(payload),
       });
 
       let data = {};
@@ -52,10 +58,30 @@ export default function ChatPanel() {
       }
 
       if (typeof data.response !== "string") {
-        throw new Error("Invalid response from server (missing response text)");
+        throw new Error("Invalid response from server (response must be a string)");
       }
 
-      appendMessage("assistant", data.response);
+      const tool = data.toolCall;
+      const isEditTool =
+        tool &&
+        typeof tool === "object" &&
+        tool.action === "edit_file" &&
+        typeof tool.filename === "string" &&
+        typeof tool.content === "string";
+
+      if (isEditTool) {
+        onToolCall?.(tool);
+      }
+
+      const textPart = data.response.trim();
+      const toolNote = isEditTool ? `Applied edit: ${tool.filename}` : "";
+
+      if (!textPart && !isEditTool) {
+        throw new Error("Invalid response from server (empty reply)");
+      }
+
+      const assistantBody = [textPart, toolNote].filter(Boolean).join("\n\n");
+      appendMessage("assistant", assistantBody);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       appendMessage("error", msg);
@@ -69,8 +95,9 @@ export default function ChatPanel() {
       <div className="chat-panel__messages" ref={listRef} role="log" aria-live="polite">
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
-            Messages are sent to <code>POST /chat</code> (proxied to Express). Set{" "}
-            <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
+            Sends your message and workspace files to <code>POST /chat</code>. The assistant can
+            reply with text or a structured <code>edit_file</code> action (applied to the editor
+            automatically). Set <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
           </p>
         )}
         {messages.map((msg) => (

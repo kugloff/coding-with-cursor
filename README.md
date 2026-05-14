@@ -7,9 +7,9 @@ This repo is a small **JavaScript** (no TypeScript) fullstack setup:
 | API    | `server/` | Node.js, Express, ES modules  | http://localhost:3001    |
 | UI     | `client/` | React 19, Vite 6, Monaco Editor | http://localhost:5173    |
 
-**Frontend UI:** three-column **dark** workspace — **Explorer** (in-memory files, create + select), **Monaco** (content + language per file), **Chat** wired to **`POST /chat`** (see [Chat UI and backend](#chat-ui-and-backend) and [In-memory workspace files](#in-memory-workspace-files)).
+**Frontend UI:** three-column **dark** workspace — **Explorer** (in-memory files), **Monaco**, **Chat** (**`POST /chat`**: text replies + optional **`edit_file`** tool payload parsed on the server; see [Assistant reply format](#assistant-reply-format-tool-calls)).
 
-**Google Gemini (server):** chat is implemented in `server/services/geminiService.js` using `@google/generative-ai` and model **`gemini-1.5-flash`**. The API key is read from **`GEMINI_API_KEY`** (never commit the real key).
+**Google Gemini (server):** chat is implemented in `server/services/geminiService.js` using `@google/generative-ai` and model **`gemini-2.5-flash`** (see `MODEL_NAME` in that file). The API key is read from **`GEMINI_API_KEY`** (never commit the real key).
 
 ---
 
@@ -22,9 +22,10 @@ When you ask for changes, it helps to specify:
 3. **API contract** — if adding endpoints: method, path, request/response shape, auth.
 4. **Env** — Node version if not default LTS; any secrets via `.env` (never commit real secrets).
 5. **Ports** — if you change `3001` / `5173`, say so (CORS + Vite proxy must stay aligned).
-6. **Gemini** — for chat or model changes: confirm `GEMINI_API_KEY` in the server environment and desired model name (default `gemini-1.5-flash` in `server/services/geminiService.js`).
+6. **Gemini** — for chat or model changes: confirm `GEMINI_API_KEY` in the server environment and desired model name (see `MODEL_NAME` in `server/services/geminiService.js`).
 7. **Monaco / layout** — if changing the editor: `client/src/components/CodeEditor.jsx`, `vite.config.js` (Monaco plugin), and `App.css` (pane widths `--width-explorer`, `--width-chat`).
 8. **Virtual files** — state lives in `App.jsx` (`workspace.files` map); no persistence unless you add it.
+9. **Assistant tool JSON** — if changing the `edit_file` contract, update **`server/assistantOutput.js`**, **`ChatPanel`**, **`App.jsx` `handleChatToolCall`**, and this README.
 
 ---
 
@@ -72,7 +73,7 @@ This runs **Express** and **Vite** together via `concurrently`.
 
 **Explorer / editor:** use **New file** to add `untitled-N.js` entries. Click a file to open it in Monaco; edits update **`workspace.files[path]`** in React state immediately (no disk, no DB). Refreshing the page resets to the default **`main.js`** starter.
 
-**Chat in the UI:** the right panel is a **threaded chat** — **You** vs **Assistant** bubbles; each send is **`POST /chat`** with `{ "message": string }`. Run **`npm run dev`** so Vite proxies `/chat` to Express and set **`GEMINI_API_KEY`** in **`server/.env`**.
+**Chat in the UI:** sends **`message`**, **`files`**, **`currentFile`** to **`POST /chat`**. The API returns **`response`** text and/or **`toolCall`**; the client applies **`edit_file`** to in-memory workspace state. Set **`GEMINI_API_KEY`** in **`server/.env`**.
 
 ### Run one side only
 
@@ -112,7 +113,7 @@ Serving the built SPA from Express is **not** wired yet; say if you want `expres
 | `src/App.jsx` | Workspace shell; **`workspace`** state: `{ files: Record<path, string>, activePath }` — create/select/edit all update this object in memory |
 | `src/components/FileExplorer.jsx` | Lists `paths`, **New file** button, file buttons with `aria-current` for selection |
 | `src/components/CodeEditor.jsx` | **Monaco** — `key={path}` remounts per file; `language` from extension (`.js`, `.json`, `.css`, …) |
-| `src/components/ChatPanel.jsx` | Chat thread: **`fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) })`** → append user bubble, then assistant bubble from **`data.response`**, or an **Error** row on failure |
+| `src/components/ChatPanel.jsx` | **`POST /chat`** payload `{ message, files, currentFile }`; reads **`response`** + **`toolCall`**; calls **`onToolCall`** for **`edit_file`**; shows combined assistant text |
 
 ### Chat UI and backend
 
@@ -123,22 +124,23 @@ sequenceDiagram
   participant API as Express /chat
   participant Gemini as Gemini API
 
-  UI->>Vite: POST /chat { message }
+  UI->>Vite: POST /chat { message, files, currentFile }
   Vite->>API: proxy to :3001/chat
-  API->>Gemini: generateContent
+  API->>Gemini: generateContent (prompt + file context)
   Gemini-->>API: text
-  API-->>Vite: 200 { response }
-  Vite-->>UI: JSON
-  UI->>UI: append Assistant bubble
+  API-->>Vite: 200 { response, toolCall }
+  Vite-->>UI: JSON { response, toolCall }
+  UI->>UI: if toolCall.edit_file → update files + activePath
 ```
 
 | Step | Detail |
 |------|--------|
 | 1 | User submits text; UI immediately shows a **You** message. |
-| 2 | `POST /chat` with body **`{ "message": "<trimmed text>" }`**. |
-| 3 | On **200**, UI reads **`response`** (string) and shows **Assistant**. |
-| 4 | On error (non-OK or network), UI shows **Error** with `detail` / `error` from JSON when present. |
-| 5 | In dev, **`client/vite.config.js`** proxies **`/chat`** → `http://localhost:3001/chat` (same path). |
+| 2 | `POST /chat` with body **`{ "message": string, "files"?: object, "currentFile"?: string \| null }`**. |
+| 3 | On **200**, body has **`response`** (string, may be `""`) and **`toolCall`** (`null` or object). |
+| 4 | If **`toolCall.action === "edit_file"`**, the UI merges **`content`** into **`files[filename]`** and focuses that file. |
+| 5 | On error (non-OK or network), UI shows **Error** with `detail` / `error` from JSON when present. |
+| 6 | In dev, **`client/vite.config.js`** proxies **`/chat`** → `http://localhost:3001/chat` (same path). |
 
 **Styles:** `src/App.css` (workspace + chat turns/bubbles), `src/index.css` (theme tokens).
 
@@ -163,7 +165,9 @@ sequenceDiagram
 | Language | **`languageFromFilename()`** in `App.jsx` maps extension → Monaco language (unknown → `plaintext`). |
 | Remount | **`CodeEditor`** passes **`key={path}`** to Monaco so each file gets a clean editor instance when switching. |
 
-Data is **not** sent to the server unless you add that later; **reload** restores only **`DEFAULT_FILES`** (`main.js`).
+The **Chat** panel passes the full **`files`** map and **`currentFile`** (`activePath`) on every **`POST /chat`**, and applies **`toolCall`** **`edit_file`** updates from the assistant back into **`workspace.files`** (subject to server-side size limits).
+
+Data is **not** sent to the server except through **chat** (and other API calls you add); **reload** restores only **`DEFAULT_FILES`** (`main.js`).
 
 ---
 
@@ -206,27 +210,51 @@ If you change the Vite port, set `CLIENT_ORIGIN` in `server/.env` (or the shell)
 |--------|----------------|-------------------------------------------------------|
 | GET    | `/api/health`  | `{ "ok": true, "service": "express", "timestamp": … }` |
 | GET    | `/api/hello`   | `{ "message": "Hello from the Express API" }`       |
-| POST   | `/chat`        | Success: `{ "response": "<model text>" }` — see below |
+| POST   | `/chat`        | Success: `{ "response": string, "toolCall": null \| { "action":"edit_file", "filename", "content" } }` — see below |
 
-### `POST /chat` (Gemini)
+### `POST /chat` (Gemini + workspace context)
 
 - **URL (via Vite dev server):** `http://localhost:5173/chat` (proxied to Express).  
 - **URL (direct to API):** `http://localhost:3001/chat`
-- **Headers:** `Content-Type: application/json`
-- **Body:** `{ "message": "<string>" }` — `message` must be a non-empty string after trimming.
-- **Success (200):** `{ "response": "<string>" }` — assistant text only.
+- **Headers:** `Content-Type: application/json` (body limit **4 MB** on the server for large workspaces)
+- **Body (JSON):**
+  - **`message`** (required): non-empty string — the user’s question or instruction.
+  - **`files`** (optional): object whose keys are file paths (strings) and values are file contents (strings). Max **200** files; path length max **1024** chars per key.
+  - **`currentFile`** (optional): string or `null` — which file is focused in the editor (included in the prompt so the model knows context).
+- **Success (200):** JSON body:
+  - **`response`** (string): plain-text assistant message. May be empty when only a tool call is returned.
+  - **`toolCall`** (`null` or object): when present and valid, describes a machine-readable action for the client.
 
-**Error responses (JSON):** failures return an object with at least `error` and usually `detail` (human-readable). Status codes include:
+When **`files`** is omitted or empty, the server sends **`message`** only to Gemini (same as before). When **`files`** is present, the server builds a prompt that lists each file’s content (with **soft size limits** inside `geminiService.js`: total context and per-file caps; oversized content is truncated with a short marker in the prompt).
+
+The model is instructed (see **`RESPONSE_FORMAT_RULES`** in `server/services/geminiService.js`) to answer in **plain text** or, to replace a whole file, output **only** a JSON object (optionally wrapped in a single fenced markdown code block tagged `json`) of the form:
+
+```json
+{ "action": "edit_file", "filename": "<path>", "content": "<full new file text>" }
+```
+
+The server parses this with **`parseAssistantModelOutput`** in **`server/assistantOutput.js`**: if the trimmed output parses as JSON with **`action === "edit_file"`** and string **`filename`** / **`content`**, the API returns that object as **`toolCall`** and sets **`response`** to `""` unless you later extend the parser to support mixed content.
+
+### Assistant reply format (tool calls)
+
+| Field | Type | Meaning |
+|-------|------|--------|
+| `response` | string | Human-readable reply; may be `""` when the model returned only a tool JSON payload. |
+| `toolCall` | `null` \| object | `null` for normal chat. Otherwise `{ "action": "edit_file", "filename": string, "content": string }` after server-side validation of the parsed JSON. |
+
+**Client behavior:** `ChatPanel` invokes **`onToolCall`** so `App.jsx` can **`setWorkspace`**: merge **`files[filename]`** with **`content`**, set **`activePath`** to that **`filename`** (creates the file entry if it did not exist).
+
+**Error responses (JSON):** failures return at least `error` and usually `detail` (human-readable). Status codes include:
 
 | Status | When |
 |--------|------|
-| `400`  | Missing/invalid `message` in body |
+| `400`  | Missing/invalid `message`, or invalid `files` / `currentFile` shape |
 | `401` / `403` | Upstream rejected the key or permission (mapped from Gemini client when detectable) |
 | `429`  | Rate limited by Gemini |
 | `500`  | Missing `GEMINI_API_KEY`, or unexpected server error |
 | `502`  | Upstream Gemini failure / empty model output when not classified otherwise |
 
-The Express app uses **`express.json()`**, **CORS** (`CLIENT_ORIGIN`), and delegates generation to **`generateResponse(message)`** in `server/services/geminiService.js` (`@google/generative-ai`, model **`gemini-1.5-flash`**).
+The Express app uses **`express.json({ limit: "4mb" })`**, **CORS** (`CLIENT_ORIGIN`), validates the body with **`parseChatContext`** in **`server/chatBody.js`**, calls **`generateResponse({ message, files, currentFile })`** in **`server/services/geminiService.js`**, then **`parseAssistantModelOutput`** in **`server/assistantOutput.js`** on the model text before responding.
 
 ---
 
@@ -239,10 +267,12 @@ The Express app uses **`express.json()`**, **CORS** (`CLIENT_ORIGIN`), and deleg
 ├── server/
 │   ├── package.json
 │   ├── index.js          # Express entry (imports env.js first)
+│   ├── assistantOutput.js # parseAssistantModelOutput(raw) — text vs edit_file JSON
+│   ├── chatBody.js       # parseChatContext(files, currentFile) for POST /chat
 │   ├── env.js            # Loads server/.env via dotenv
 │   ├── .env.example      # Template for secrets (copy to .env)
 │   └── services/
-│       └── geminiService.js   # generateResponse(message) → Gemini text
+│       └── geminiService.js   # Gemini call + prompt; returns { response, toolCall }
 └── client/
     ├── package.json
     ├── vite.config.js
@@ -268,7 +298,7 @@ The Express app uses **`express.json()`**, **CORS** (`CLIENT_ORIGIN`), and deleg
 - **Virtual workspace files:** in-memory map + `activePath` in **`client/src/App.jsx`**; not persisted (refresh resets to `main.js` only).
 - **CORS:** Restricted to `CLIENT_ORIGIN` in dev; extend or use a list if you add more origins.
 - **Proxy:** During `vite` dev, `/api` and `/chat` are proxied to the Express port (`client/vite.config.js`).
-- **Monaco:** `vite.config.js` registers `vite-plugin-monaco-editor` **after** `@vitejs/plugin-react` so workers build and copy to `dist/monacoeditorwork/` on production builds.
+- **Chat + code context:** `POST /chat` accepts **`files`** + **`currentFile`**; **`assistantOutput.js`** detects **`edit_file`** JSON vs plain text; **`App.jsx`** applies **`toolCall`** to workspace state.
 
 ---
 
@@ -281,7 +311,7 @@ The Express app uses **`express.json()`**, **CORS** (`CLIENT_ORIGIN`), and deleg
 | `npm run dev` fails             | Run `npm run install:all` from root first        |
 | `POST /chat` → 500 “Server configuration error” | `GEMINI_API_KEY` missing — add it to **`server/.env`** or the shell environment |
 | `POST /chat` → 401/403 from API | Invalid or revoked API key, or API not enabled for the project |
-| `POST /chat` → 429 | Gemini rate limit; retry later |
+| `POST /chat` → 400 with "files" detail | Fix `files` shape (object of string → string) or `currentFile` type |
 | Monaco workers 404 after deploy | Ensure `monacoeditorwork` from `client/dist` is deployed next to assets / same base path |
 | `monacoEditorPlugin is not a function` (build) | Use `default` export from `vite-plugin-monaco-editor` in `vite.config.js` (already applied in this repo) |
 | Created files vanish on refresh | Expected: virtual files live only in React state; add persistence if you need it |

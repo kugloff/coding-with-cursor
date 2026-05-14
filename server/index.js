@@ -6,6 +6,7 @@ import {
   GeminiConfigurationError,
   GeminiApiError,
 } from "./services/geminiService.js";
+import { parseChatContext } from "./chatBody.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -19,7 +20,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "4mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "express", timestamp: new Date().toISOString() });
@@ -30,18 +31,35 @@ app.get("/api/hello", (_req, res) => {
 });
 
 app.post("/chat", async (req, res) => {
-  const { message } = req.body ?? {};
+  const body = req.body ?? {};
+  const { message, files: rawFiles, currentFile: rawCurrentFile } = body;
 
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({
       error: "Invalid request body",
-      detail: 'Expected JSON: { "message": "<non-empty string>" }',
+      detail:
+        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content), "currentFile" (string).',
+    });
+  }
+
+  const parsed = parseChatContext(rawFiles, rawCurrentFile);
+  if (!parsed.ok) {
+    return res.status(400).json({
+      error: "Invalid request body",
+      detail: parsed.detail,
     });
   }
 
   try {
-    const text = await generateResponse(message.trim());
-    return res.json({ response: text });
+    const result = await generateResponse({
+      message: message.trim(),
+      files: parsed.files,
+      currentFile: parsed.currentFile,
+    });
+    return res.json({
+      response: result.response ?? "",
+      toolCall: result.toolCall ?? null,
+    });
   } catch (err) {
     if (err instanceof GeminiConfigurationError) {
       return res.status(500).json({

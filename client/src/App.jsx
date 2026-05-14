@@ -83,6 +83,18 @@ export default function App() {
     });
   }, []);
 
+  const handleChatToolCall = useCallback((tool) => {
+    if (!tool || tool.action !== "edit_file") return;
+    const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
+    if (!filename || filename.length > 1024) return;
+    if (typeof tool.content !== "string") return;
+    setWorkspace((w) => ({
+      ...w,
+      files: { ...w.files, [filename]: tool.content },
+      activePath: filename,
+    }));
+  }, []);
+
   return (
     <div className="workspace">
       <header className="workspace__topbar">
@@ -127,7 +139,7 @@ export default function App() {
           <div className="pane-header">
             <h2 className="pane-header__title">Chat</h2>
           </div>
-          <ChatPanel />
+          <ChatPanel files={files} currentFile={activePath} onToolCall={handleChatToolCall} />
         </aside>
       </div>
     </div>
