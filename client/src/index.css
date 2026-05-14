@@ -1,35 +1,52 @@
 :root {
-  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color-scheme: dark;
 
-  --text-primary: #e8eaef;
-  --text-muted: #9aa3b2;
-  --text-dim: #6b7280;
+  --text-primary: #eceef1;
+  --text-secondary: #b8bec8;
+  --text-muted: #8b95a5;
+  --text-dim: #5c6570;
 
-  --bg-app: #08090c;
-  --bg-elevated: #0f1117;
-  --bg-pane: #0c0e12;
-  --bg-pane-header: rgba(255, 255, 255, 0.02);
-  --bg-pane-footer: #0a0c10;
-  --bg-inset: #06070a;
-  --bg-editor: #0d0f14;
+  --bg-app: #050607;
+  --bg-app-2: #0a0b0e;
+  --bg-elevated: #0e1015;
+  --bg-pane: #0b0d11;
+  --bg-pane-2: #0f1118;
+  --bg-pane-header: rgba(255, 255, 255, 0.03);
+  --bg-pane-footer: #08090d;
+  --bg-inset: #060709;
+  --bg-editor: #090b10;
+  --bg-chat-thread: linear-gradient(180deg, #0a0c11 0%, #08090e 100%);
+  --bg-composer: rgba(255, 255, 255, 0.03);
 
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --accent: #7dd3fc;
-  --accent-dim: #5eb8e5;
-  --accent-border: rgba(125, 211, 252, 0.45);
-  --accent-glow: rgba(125, 211, 252, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.1);
+  --accent: #6ec9ff;
+  --accent-soft: rgba(110, 201, 255, 0.14);
+  --accent-dim: #4aa8dd;
+  --accent-border: rgba(110, 201, 255, 0.4);
+  --accent-glow: rgba(110, 201, 255, 0.1);
 
-  --bubble-user-bg: rgba(125, 211, 252, 0.1);
-  --bubble-user-border: rgba(125, 211, 252, 0.22);
-  --bubble-ai-bg: rgba(255, 255, 255, 0.04);
+  --bubble-user-bg: rgba(110, 201, 255, 0.08);
+  --bubble-user-border: rgba(110, 201, 255, 0.22);
+  --bubble-ai-bg: rgba(255, 255, 255, 0.035);
+  --bubble-ai-border: rgba(255, 255, 255, 0.06);
 
-  --topbar-height: 40px;
-  --pane-header-height: 34px;
-  --width-explorer: 232px;
-  --width-chat: 340px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 0.15s;
+  --dur-med: 0.22s;
+
+  --topbar-height: 42px;
+  --pane-header-height: 36px;
+  --width-explorer: 244px;
+  --width-chat: 384px;
 }
 
 *,
@@ -48,6 +65,17 @@ body {
   margin: 0;
   min-height: 100vh;
   background: var(--bg-app);
+  background-image: radial-gradient(ellipse 120% 80% at 50% -30%, rgba(110, 201, 255, 0.06), transparent);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

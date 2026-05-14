@@ -5,9 +5,9 @@ This repo is a small **JavaScript** (no TypeScript) fullstack setup:
 | Part   | Path      | Stack                          | Default URL              |
 |--------|-----------|--------------------------------|--------------------------|
 | API    | `server/` | Node.js, Express, ES modules  | http://localhost:3001    |
-| UI     | `client/` | React 19, Vite 6, Monaco Editor | http://localhost:5173    |
+| UI     | `client/` | React 19, Vite 6, Monaco, **lucide-react** icons | http://localhost:5173    |
 
-**Frontend UI:** three-column **dark** workspace — **Explorer** (in-memory files), **Monaco**, **Chat** (**`POST /chat`**: text replies + optional **`edit_file`** tool payload parsed on the server; see [Assistant reply format](#assistant-reply-format-tool-calls)).
+**Frontend UI:** **Cursor-inspired** dark workspace — layered backgrounds, **lucide-react** icons, smooth **CSS motion** (messages, file list, typing dots, toasts), **Explorer** with per-type file icons, **Monaco** center, **AI Chat** (avatar rows + composer). **`edit_file`** updates files, Monaco **`editorNonce`**, and **“File updated by AI”** toast (see [Assistant reply format](#assistant-reply-format-tool-calls)).
 
 **Google Gemini (server):** chat is implemented in `server/services/geminiService.js` using `@google/generative-ai` and model **`gemini-2.5-flash`** (see `MODEL_NAME` in that file). The API key is read from **`GEMINI_API_KEY`** (never commit the real key).
 
@@ -23,9 +23,9 @@ When you ask for changes, it helps to specify:
 4. **Env** — Node version if not default LTS; any secrets via `.env` (never commit real secrets).
 5. **Ports** — if you change `3001` / `5173`, say so (CORS + Vite proxy must stay aligned).
 6. **Gemini** — for chat or model changes: confirm `GEMINI_API_KEY` in the server environment and desired model name (see `MODEL_NAME` in `server/services/geminiService.js`).
-7. **Monaco / layout** — if changing the editor: `client/src/components/CodeEditor.jsx`, `vite.config.js` (Monaco plugin), and `App.css` (pane widths `--width-explorer`, `--width-chat`).
+7. **Monaco / layout / UI** — `CodeEditor.jsx`, **`App.css`** / **`index.css`** tokens, **`lucide-react`** icons, `vite.config.js` (Monaco plugin).
 8. **Virtual files** — state lives in `App.jsx` (`workspace.files` map); no persistence unless you add it.
-9. **Assistant tool JSON** — if changing the `edit_file` contract, update **`server/assistantOutput.js`**, **`ChatPanel`**, **`App.jsx` `handleChatToolCall`**, and this README.
+9. **Assistant tool JSON** — if changing the `edit_file` contract, update **`server/assistantOutput.js`**, **`ChatPanel`**, **`App.jsx`** (`handleChatToolCall`, toast, **`editorNonce`**), **`CodeEditor`**, and this README.
 
 ---
 
@@ -73,7 +73,7 @@ This runs **Express** and **Vite** together via `concurrently`.
 
 **Explorer / editor:** use **New file** to add `untitled-N.js` entries. Click a file to open it in Monaco; edits update **`workspace.files[path]`** in React state immediately (no disk, no DB). Refreshing the page resets to the default **`main.js`** starter.
 
-**Chat in the UI:** sends **`message`**, **`files`**, **`currentFile`** to **`POST /chat`**. The API returns **`response`** text and/or **`toolCall`**; the client applies **`edit_file`** to in-memory workspace state. Set **`GEMINI_API_KEY`** in **`server/.env`**.
+**Chat in the UI:** **`POST /chat`** with workspace context; on **`edit_file`**, **`App.jsx`** updates **`files`**, focuses the file, bumps **`editorNonce`** so Monaco reloads content, and shows a **toast** (“File updated by AI”, ~3.2s). Set **`GEMINI_API_KEY`** in **`server/.env`**.
 
 ### Run one side only
 
@@ -110,10 +110,10 @@ Serving the built SPA from Express is **not** wired yet; say if you want `expres
 
 | Piece | Role |
 |--------|------|
-| `src/App.jsx` | Workspace shell; **`workspace`** state: `{ files: Record<path, string>, activePath }` — create/select/edit all update this object in memory |
-| `src/components/FileExplorer.jsx` | Lists `paths`, **New file** button, file buttons with `aria-current` for selection |
-| `src/components/CodeEditor.jsx` | **Monaco** — `key={path}` remounts per file; `language` from extension (`.js`, `.json`, `.css`, …) |
-| `src/components/ChatPanel.jsx` | **`POST /chat`** payload `{ message, files, currentFile }`; reads **`response`** + **`toolCall`**; calls **`onToolCall`** for **`edit_file`**; shows combined assistant text |
+| `src/App.jsx` | Workspace + **topbar icons**; **`handleChatToolCall`**, **`editorNonce`**, **`.ai-toast`** |
+| `src/components/FileExplorer.jsx` | File list + **New file**; **`lucide-react`** icons by extension (`FileJson`, `FileCode`, `FileText`, `File`); row **hover / active** transitions |
+| `src/components/CodeEditor.jsx` | **Monaco** — `key` uses **`path`** + **`editorNonce`**; `language` from extension (`.js`, `.json`, `.css`, …) |
+| `src/components/ChatPanel.jsx` | **Cursor-style** thread (`chat-msg` + avatars: **User** / **Sparkles** AI / **AlertCircle** error), **typing dots**, composer bar with round **ArrowUp** send; **`POST /chat`** + **`onToolCall`** |
 
 ### Chat UI and backend
 
@@ -130,29 +130,30 @@ sequenceDiagram
   Gemini-->>API: text
   API-->>Vite: 200 { response, toolCall }
   Vite-->>UI: JSON { response, toolCall }
-  UI->>UI: if toolCall.edit_file → update files + activePath
+  UI->>UI: merge files + activePath + editorNonce + toast
 ```
 
 | Step | Detail |
 |------|--------|
-| 1 | User submits text; UI immediately shows a **You** message. |
+| 1 | User submits text; UI immediately shows a **user** row (avatar + bubble). |
 | 2 | `POST /chat` with body **`{ "message": string, "files"?: object, "currentFile"?: string \| null }`**. |
 | 3 | On **200**, body has **`response`** (string, may be `""`) and **`toolCall`** (`null` or object). |
-| 4 | If **`toolCall.action === "edit_file"`**, the UI merges **`content`** into **`files[filename]`** and focuses that file. |
+| 4 | If **`toolCall.action === "edit_file"`**, **`onToolCall`** updates **`files[filename]`**, sets **`activePath`**, bumps **`editorNonce`** (Monaco **`key`**), shows toast **“File updated by AI”**. |
 | 5 | On error (non-OK or network), UI shows **Error** with `detail` / `error` from JSON when present. |
 | 6 | In dev, **`client/vite.config.js`** proxies **`/chat`** → `http://localhost:3001/chat` (same path). |
 
-**Styles:** `src/App.css` (workspace + chat turns/bubbles), `src/index.css` (theme tokens).
+**Styles:** `src/App.css` (workspace, **Cursor-style** chat thread + composer, explorer, motion keyframes, **`.ai-toast`**), `src/index.css` (dark tokens, **body radial glow**, **`prefers-reduced-motion`** overrides).
 
 **Dependencies (notable):**
 
+- `lucide-react` — icons (explorer file types, pane headers, chat avatars, send **ArrowUp**, brand **PanelsTopLeft** / **Sparkles**)
 - `@monaco-editor/react` — React wrapper for Monaco
 - `monaco-editor` — editor engine (peer to the wrapper)
 - `vite-plugin-monaco-editor` (**devDependency**) — wires Monaco workers for Vite; in `vite.config.js` the plugin is loaded with **`monacoEditorModule.default ?? monacoEditorModule`** because the package is CJS and Vite’s ESM interop may not expose `default` as a callable.
 
 **Production note:** `vite preview` or a static host must proxy **`/chat`** to your API or use a full API URL — the code uses a **relative** `/chat` URL.
 
-**Layout:** fixed left width (`--width-explorer`: 232px), flexible center editor, fixed right width (`--width-chat`: 340px), full viewport height. **Accessibility:** chat input has a visually hidden label; message list uses `role="log"` / `aria-live="polite"`.
+**Layout:** fixed left width (`--width-explorer`: **244px**), flexible center editor, fixed right width (`--width-chat`: **384px**), full viewport height. **Accessibility:** chat input has a visually hidden label; message list uses `role="log"` / `aria-live="polite"`.
 
 ### In-memory workspace files
 
@@ -163,9 +164,9 @@ sequenceDiagram
 | Select | Clicking a file sets **`activePath`**; explorer highlights the active file (`aria-current="true"`). |
 | Editor | Monaco **`value`** is **`files[activePath]`**; **`onChange`** writes back into **`files[activePath]`** (live “save” in RAM). |
 | Language | **`languageFromFilename()`** in `App.jsx` maps extension → Monaco language (unknown → `plaintext`). |
-| Remount | **`CodeEditor`** passes **`key={path}`** to Monaco so each file gets a clean editor instance when switching. |
+| Remount | **`CodeEditor`** uses **`key={\`${path}:${editorNonce}\`}`**: changing tabs changes **`path`**; after an AI **`edit_file`**, **`App`** increments **`editorNonce`** so Monaco shows the new **`content`** even for the already-focused file. |
 
-The **Chat** panel passes the full **`files`** map and **`currentFile`** (`activePath`) on every **`POST /chat`**, and applies **`toolCall`** **`edit_file`** updates from the assistant back into **`workspace.files`** (subject to server-side size limits).
+The **Chat** panel passes **`files`** + **`currentFile`** on each **`POST /chat`**; **`edit_file`** is applied in **`App.jsx`** with the toast + nonce behavior above.
 
 Data is **not** sent to the server except through **chat** (and other API calls you add); **reload** restores only **`DEFAULT_FILES`** (`main.js`).
 
@@ -242,7 +243,7 @@ The server parses this with **`parseAssistantModelOutput`** in **`server/assista
 | `response` | string | Human-readable reply; may be `""` when the model returned only a tool JSON payload. |
 | `toolCall` | `null` \| object | `null` for normal chat. Otherwise `{ "action": "edit_file", "filename": string, "content": string }` after server-side validation of the parsed JSON. |
 
-**Client behavior:** `ChatPanel` invokes **`onToolCall`** so `App.jsx` can **`setWorkspace`**: merge **`files[filename]`** with **`content`**, set **`activePath`** to that **`filename`** (creates the file entry if it did not exist).
+**Client behavior:** `ChatPanel` calls **`onToolCall(tool)`** for **`edit_file`**. **`App.jsx`** **`handleChatToolCall`** updates **`workspace`**, increments **`editorNonce`**, and shows **`ai-toast`** (“File updated by AI”, `role="status"`, auto-dismiss ~3.2s). **`CodeEditor`** receives **`editorNonce`** as part of the Monaco **`key`** so the editor reflects AI-written content immediately.
 
 **Error responses (JSON):** failures return at least `error` and usually `detail` (human-readable). Status codes include:
 
@@ -298,7 +299,9 @@ The Express app uses **`express.json({ limit: "4mb" })`**, **CORS** (`CLIENT_ORI
 - **Virtual workspace files:** in-memory map + `activePath` in **`client/src/App.jsx`**; not persisted (refresh resets to `main.js` only).
 - **CORS:** Restricted to `CLIENT_ORIGIN` in dev; extend or use a list if you add more origins.
 - **Proxy:** During `vite` dev, `/api` and `/chat` are proxied to the Express port (`client/vite.config.js`).
-- **Chat + code context:** `POST /chat` accepts **`files`** + **`currentFile`**; **`assistantOutput.js`** detects **`edit_file`** JSON vs plain text; **`App.jsx`** applies **`toolCall`** to workspace state.
+- **Chat + code context:** `POST /chat` with **`files`** / **`currentFile`**; **`assistantOutput.js`** parses **`edit_file`**; **`App.jsx`** applies tools, **`editorNonce`**, and **`.ai-toast`**.
+- **UI / motion:** **`lucide-react`** + **Cursor-style** chat (`App.css` / `index.css`); **`prefers-reduced-motion`** shortens animations.
+- **Monaco:** `vite.config.js` registers `vite-plugin-monaco-editor` **after** `@vitejs/plugin-react` (workers → `dist/monacoeditorwork/`).
 
 ---
 

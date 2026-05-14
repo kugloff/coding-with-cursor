@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, ArrowUp, Sparkles, User } from "lucide-react";
 
 export default function ChatPanel({ files = {}, currentFile = null, onToolCall }) {
   const [messages, setMessages] = useState([]);
@@ -74,13 +75,16 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
       }
 
       const textPart = data.response.trim();
-      const toolNote = isEditTool ? `Applied edit: ${tool.filename}` : "";
 
-      if (!textPart && !isEditTool) {
+      let assistantBody = textPart;
+      if (isEditTool && !textPart) {
+        assistantBody = "File updated by AI.";
+      }
+
+      if (!assistantBody && !isEditTool) {
         throw new Error("Invalid response from server (empty reply)");
       }
 
-      const assistantBody = [textPart, toolNote].filter(Boolean).join("\n\n");
       appendMessage("assistant", assistantBody);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -92,57 +96,83 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
 
   return (
     <div className="chat-panel">
-      <div className="chat-panel__messages" ref={listRef} role="log" aria-live="polite">
+      <div className="chat-panel__thread" ref={listRef} role="log" aria-live="polite">
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
-            Sends your message and workspace files to <code>POST /chat</code>. The assistant can
-            reply with text or a structured <code>edit_file</code> action (applied to the editor
-            automatically). Set <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
+            Cursor-style chat: ask about your code, or let the model return an{" "}
+            <code>edit_file</code> JSON action. Workspace is sent with each message. Set{" "}
+            <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
           </p>
         )}
         {messages.map((msg) => (
           <article
             key={msg.id}
-            className={`chat-panel__turn chat-panel__turn--${msg.role}`}
-            aria-label={msg.role === "user" ? "You" : msg.role === "assistant" ? "Assistant" : "Error"}
+            className={`chat-msg chat-msg--${msg.role}`}
+            aria-label={msg.role === "user" ? "You" : msg.role === "assistant" ? "AI" : "Error"}
           >
-            <div className="chat-panel__turn-meta">
-              {msg.role === "user" && "You"}
-              {msg.role === "assistant" && "Assistant"}
-              {msg.role === "error" && "Error"}
+            <div className="chat-msg__avatar" aria-hidden>
+              {msg.role === "user" && <User size={13} strokeWidth={2} />}
+              {msg.role === "assistant" && <Sparkles size={13} strokeWidth={2} />}
+              {msg.role === "error" && <AlertCircle size={13} strokeWidth={2} />}
             </div>
-            <div className={`chat-panel__bubble chat-panel__bubble--${msg.role}`}>{msg.text}</div>
+            <div className="chat-msg__body">
+              <div className="chat-msg__label">
+                {msg.role === "user" && "You"}
+                {msg.role === "assistant" && "AI"}
+                {msg.role === "error" && "Error"}
+              </div>
+              <div className={`chat-msg__bubble chat-msg__bubble--${msg.role}`}>{msg.text}</div>
+            </div>
           </article>
         ))}
         {pending && (
-          <div className="chat-panel__turn chat-panel__turn--assistant" aria-busy="true">
-            <div className="chat-panel__turn-meta">Assistant</div>
-            <div className="chat-panel__bubble chat-panel__bubble--typing">Thinking…</div>
+          <div className="chat-msg chat-msg--assistant" aria-busy="true">
+            <div className="chat-msg__avatar" aria-hidden>
+              <Sparkles size={13} strokeWidth={2} />
+            </div>
+            <div className="chat-msg__body">
+              <div className="chat-msg__label">AI</div>
+              <div className="chat-msg__bubble chat-msg__bubble--typing">
+                <span>Thinking</span>
+                <span className="chat-typing-dots" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </div>
-      <form className="chat-panel__form" onSubmit={handleSend}>
+      <form className="chat-panel__composer" onSubmit={handleSend}>
         <label className="visually-hidden" htmlFor="chat-input">
           Message
         </label>
-        <textarea
-          id="chat-input"
-          className="chat-panel__input"
-          rows={2}
-          placeholder="Ask the assistant… (Enter to send, Shift+Enter for newline)"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend(e);
-            }
-          }}
-          disabled={pending}
-        />
-        <button type="submit" className="chat-panel__send" disabled={pending || !input.trim()}>
-          Send
-        </button>
+        <div className="chat-panel__composer-inner">
+          <textarea
+            id="chat-input"
+            className="chat-panel__input"
+            rows={1}
+            placeholder="Ask AI — Enter to send · Shift+Enter newline"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend(e);
+              }
+            }}
+            disabled={pending}
+          />
+          <button
+            type="submit"
+            className="chat-panel__send"
+            disabled={pending || !input.trim()}
+            aria-label="Send message"
+          >
+            <ArrowUp size={17} strokeWidth={2.5} />
+          </button>
+        </div>
       </form>
     </div>
   );

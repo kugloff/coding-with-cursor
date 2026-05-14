@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LayoutPanelLeft, MessageSquare, PanelsTopLeft, Sparkles } from "lucide-react";
 import "./App.css";
 import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
@@ -48,6 +49,24 @@ export default function App() {
     files: { ...DEFAULT_FILES },
     activePath: "main.js",
   });
+  const [editorNonce, setEditorNonce] = useState(0);
+  const [aiEditToastVisible, setAiEditToastVisible] = useState(false);
+  const toastTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  const showAiEditToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setAiEditToastVisible(true);
+    toastTimerRef.current = window.setTimeout(() => {
+      setAiEditToastVisible(false);
+      toastTimerRef.current = null;
+    }, 3200);
+  }, []);
 
   const { files, activePath } = workspace;
   const sortedPaths = useMemo(() => Object.keys(files).sort((a, b) => a.localeCompare(b)), [files]);
@@ -93,24 +112,32 @@ export default function App() {
       files: { ...w.files, [filename]: tool.content },
       activePath: filename,
     }));
-  }, []);
+    setEditorNonce((n) => n + 1);
+    showAiEditToast();
+  }, [showAiEditToast]);
 
   return (
     <div className="workspace">
       <header className="workspace__topbar">
         <div className="workspace__brand">
-          <span className="workspace__logo" aria-hidden>
-            ◆
+          <span className="workspace__brand-icon" aria-hidden>
+            <PanelsTopLeft size={18} strokeWidth={1.75} />
           </span>
           <span className="workspace__title">Workspace</span>
         </div>
-        <span className="workspace__meta">Vite · React · Monaco</span>
+        <span className="workspace__meta">
+          <Sparkles size={12} strokeWidth={2} className="workspace__meta-glow" aria-hidden />
+          Vite · React · Monaco
+        </span>
       </header>
 
       <div className="workspace__body">
         <aside className="workspace__pane workspace__pane--left">
           <div className="pane-header">
-            <h2 className="pane-header__title">Explorer</h2>
+            <h2 className="pane-header__title">
+              <LayoutPanelLeft size={12} strokeWidth={2} aria-hidden />
+              Explorer
+            </h2>
           </div>
           <FileExplorer
             paths={sortedPaths}
@@ -122,13 +149,17 @@ export default function App() {
 
         <section className="workspace__pane workspace__pane--center" aria-label="Code editor">
           <div className="pane-header pane-header--editor">
-            <h2 className="pane-header__title">Editor</h2>
+            <h2 className="pane-header__title">
+              <PanelsTopLeft size={12} strokeWidth={2} aria-hidden />
+              Editor
+            </h2>
             <span className="pane-header__pill" title={activePath || ""}>
               {activePath || "—"}
             </span>
           </div>
           <CodeEditor
             path={activePath}
+            editorNonce={editorNonce}
             value={editorValue}
             onChange={handleEditorChange}
             language={editorLanguage}
@@ -137,11 +168,20 @@ export default function App() {
 
         <aside className="workspace__pane workspace__pane--right">
           <div className="pane-header">
-            <h2 className="pane-header__title">Chat</h2>
+            <h2 className="pane-header__title">
+              <MessageSquare size={12} strokeWidth={2} aria-hidden />
+              AI Chat
+            </h2>
           </div>
           <ChatPanel files={files} currentFile={activePath} onToolCall={handleChatToolCall} />
         </aside>
       </div>
+
+      {aiEditToastVisible && (
+        <div className="ai-toast" role="status" aria-live="polite">
+          File updated by AI
+        </div>
+      )}
     </div>
   );
 }
