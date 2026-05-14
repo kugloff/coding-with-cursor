@@ -15,6 +15,10 @@ const DEFAULT_OPTIONS = {
 };
 
 export default function CodeEditor({ path, editorNonce = 0, value, onChange, language = "javascript" }) {
+  const options = {
+    ...DEFAULT_OPTIONS,
+    readOnly: !path,
+  };
   return (
     <div className="code-editor">
       <Editor
@@ -23,8 +27,8 @@ export default function CodeEditor({ path, editorNonce = 0, value, onChange, lan
         language={language}
         theme="vs-dark"
         value={value}
-        onChange={onChange}
-        options={DEFAULT_OPTIONS}
+        onChange={path ? onChange : undefined}
+        options={options}
       />
     </div>
   );

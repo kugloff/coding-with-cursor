@@ -53,6 +53,11 @@ export default function App() {
   const [aiEditToastVisible, setAiEditToastVisible] = useState(false);
   const toastTimerRef = useRef(null);
 
+  const workspaceRef = useRef(workspace);
+  useEffect(() => {
+    workspaceRef.current = workspace;
+  }, [workspace]);
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -102,6 +107,36 @@ export default function App() {
     });
   }, []);
 
+  const handleDeleteFile = useCallback((path) => {
+    if (!window.confirm(`Delete "${path}"?`)) return;
+    setWorkspace((w) => {
+      if (!(path in w.files)) return w;
+      const { [path]: removed, ...rest } = w.files;
+      void removed;
+      const keys = Object.keys(rest).sort((a, b) => a.localeCompare(b));
+      const nextActive = w.activePath === path ? keys[0] ?? null : w.activePath;
+      return { files: rest, activePath: nextActive };
+    });
+    setEditorNonce((n) => n + 1);
+  }, []);
+
+  const handleRenameFile = useCallback((oldPath, newPath) => {
+    const w = workspaceRef.current;
+    const next = typeof newPath === "string" ? newPath.trim() : "";
+    if (!(oldPath in w.files)) return false;
+    if (!next || next.length > 1024) return false;
+    if (/[/\\]/.test(next)) return false;
+    if (next === oldPath) return true;
+    if (next in w.files) return false;
+    const content = w.files[oldPath];
+    const { [oldPath]: _, ...rest } = w.files;
+    setWorkspace({
+      files: { ...rest, [next]: content },
+      activePath: w.activePath === oldPath ? next : w.activePath,
+    });
+    return true;
+  }, []);
+
   const handleChatToolCall = useCallback((tool) => {
     if (!tool || tool.action !== "edit_file") return;
     const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
@@ -144,6 +179,8 @@ export default function App() {
             activePath={activePath}
             onSelect={handleSelectFile}
             onCreate={handleCreateFile}
+            onDeleteFile={handleDeleteFile}
+            onRenameFile={handleRenameFile}
           />
         </aside>
 

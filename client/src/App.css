@@ -231,6 +231,121 @@
   animation-delay: 0.1s;
 }
 
+.file-explorer__row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  border-radius: var(--radius-sm);
+}
+
+.file-explorer__row:hover .file-explorer__actions {
+  opacity: 1;
+}
+
+.file-explorer__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.05rem;
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.file-explorer__icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.file-explorer__icon-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.file-explorer__icon-btn--danger:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.file-explorer__item--rename {
+  padding: 0.12rem 0;
+}
+
+.file-explorer__rename {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.file-explorer__rename-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.42rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.file-explorer__rename-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.file-explorer__rename-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.08rem;
+}
+
+.file-explorer__rename-save,
+.file-explorer__rename-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.file-explorer__rename-save:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.file-explorer__rename-cancel:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
+
 @keyframes file-row-in {
   from {
     opacity: 0;
@@ -246,7 +361,9 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  width: auto;
   margin: 0;
   padding: 0.38rem 0.42rem;
   border: none;

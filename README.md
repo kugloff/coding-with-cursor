@@ -71,7 +71,7 @@ This runs **Express** and **Vite** together via `concurrently`.
 
 **Gemini:** set `GEMINI_API_KEY` in **`server/.env`** (see [Environment variables](#environment-variables)) or in the shell before `npm run dev` / `npm run dev:server`.
 
-**Explorer / editor:** use **New file** to add `untitled-N.js` entries. Click a file to open it in Monaco; edits update **`workspace.files[path]`** in React state immediately (no disk, no DB). Refreshing the page resets to the default **`main.js`** starter.
+**Explorer / editor:** use **New file** to add `untitled-N.js` entries. Click a file to open it in Monaco; edits update **`workspace.files[path]`** in React state immediately (no disk, no DB). **Delete** removes a file from the map; if it was open, **`activePath`** becomes another file or **`null`** (empty read-only editor). **Rename** keeps content under a new key and updates **`activePath`** when the renamed file was focused. Names must be non-empty, at most **1024** characters, and cannot contain **`/`** or **`\`**; duplicates are rejected. Refreshing the page resets to the default **`main.js`** starter.
 
 **Chat in the UI:** **`POST /chat`** with workspace context; on **`edit_file`**, **`App.jsx`** updates **`files`**, focuses the file, bumps **`editorNonce`** so Monaco reloads content, and shows a **toast** (“File updated by AI”, ~3.2s). Set **`GEMINI_API_KEY`** in **`server/.env`**.
 
@@ -111,7 +111,7 @@ Serving the built SPA from Express is **not** wired yet; say if you want `expres
 | Piece | Role |
 |--------|------|
 | `src/App.jsx` | Workspace + **topbar icons**; **`handleChatToolCall`**, **`editorNonce`**, **`.ai-toast`** |
-| `src/components/FileExplorer.jsx` | File list + **New file**; **`lucide-react`** icons by extension (`FileJson`, `FileCode`, `FileText`, `File`); row **hover / active** transitions |
+| `src/components/FileExplorer.jsx` | File list + **New file**; per-row **Rename** (inline name field) and **Delete** (confirm in `App`); **`lucide-react`** icons by extension; row **hover / active** transitions |
 | `src/components/CodeEditor.jsx` | **Monaco** — `key` uses **`path`** + **`editorNonce`**; `language` from extension (`.js`, `.json`, `.css`, …) |
 | `src/components/ChatPanel.jsx` | **Cursor-style** thread (`chat-msg` + avatars: **User** / **Sparkles** AI / **AlertCircle** error), **typing dots**, composer bar with round **ArrowUp** send; **`POST /chat`** + **`onToolCall`** |
 
@@ -162,9 +162,11 @@ sequenceDiagram
 | Storage | `useState` in **`src/App.jsx`**: `files` is a plain object **`{ [filename]: string }`**. |
 | Create | **New file** → next free name `untitled-1.js`, `untitled-2.js`, … with starter body `// New file\n`. |
 | Select | Clicking a file sets **`activePath`**; explorer highlights the active file (`aria-current="true"`). |
-| Editor | Monaco **`value`** is **`files[activePath]`**; **`onChange`** writes back into **`files[activePath]`** (live “save” in RAM). |
+| Delete | **`handleDeleteFile`** (after confirm): removes the key from **`files`**; if **`activePath`** was that file, switches to the first remaining path (sorted) or **`null`**; bumps **`editorNonce`** so Monaco clears when nothing is open. |
+| Rename | **`handleRenameFile(old, next)`** (via **`workspaceRef`** for latest keys): copies content to **`next`**, removes **`old`**; if **`activePath === old`**, sets **`activePath`** to **`next`**. Validation: trimmed non-empty name, max length **1024**, no **`/`** or **`\`**, no duplicate keys; same name is a no-op success. |
+| Editor | Monaco **`value`** is **`files[activePath]`** (or empty when **`activePath`** is **`null`**); **`onChange`** writes back into **`files[activePath]`** when a file is open (live “save” in RAM). |
 | Language | **`languageFromFilename()`** in `App.jsx` maps extension → Monaco language (unknown → `plaintext`). |
-| Remount | **`CodeEditor`** uses **`key={\`${path}:${editorNonce}\`}`**: changing tabs changes **`path`**; after an AI **`edit_file`**, **`App`** increments **`editorNonce`** so Monaco shows the new **`content`** even for the already-focused file. |
+| Remount | **`CodeEditor`** uses **`key={\`${path}:${editorNonce}\`}`**: changing tabs changes **`path`**; after an AI **`edit_file`** or **delete**, **`App`** may increment **`editorNonce`** so Monaco shows the new **`content`** or empty state. |
 
 The **Chat** panel passes **`files`** + **`currentFile`** on each **`POST /chat`**; **`edit_file`** is applied in **`App.jsx`** with the toast + nonce behavior above.
 
