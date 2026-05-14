@@ -3,7 +3,7 @@
  * (`edit_file` or `create_file` with `filename` + `content`).
  */
 
-import { isValidJsWorkspaceFilename } from "./workspaceFilename.js";
+import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "./workspaceFilename.js";
 
 /**
  * Strip a single leading/trailing markdown ``` fence if present.
@@ -44,10 +44,18 @@ function isFileTool(obj, action) {
 }
 
 /**
+ * @param {"js" | "python"} environment
+ */
+function isValidToolWorkspaceName(name, environment) {
+  return environment === "python" ? isValidPyWorkspaceFilename(name) : isValidJsWorkspaceFilename(name);
+}
+
+/**
  * @param {string} raw Model output (trimmed or not)
+ * @param {"js" | "python"} [environment]
  * @returns {{ response: string, toolCall: null } | { response: string, toolCall: { action: string, filename: string, content: string } }}
  */
-export function parseAssistantModelOutput(raw) {
+export function parseAssistantModelOutput(raw, environment = "js") {
   const trimmed = typeof raw === "string" ? raw.trim() : "";
   if (!trimmed) {
     return { response: "", toolCall: null };
@@ -59,6 +67,9 @@ export function parseAssistantModelOutput(raw) {
     return { response: trimmed, toolCall: null };
   }
 
+  const ext = environment === "python" ? ".py" : ".js";
+  const lang = environment === "python" ? "Python" : "JavaScript";
+
   try {
     const obj = JSON.parse(candidate);
     if (isFileTool(obj, "create_file")) {
@@ -66,9 +77,9 @@ export function parseAssistantModelOutput(raw) {
       if (!name) {
         return { response: trimmed, toolCall: null };
       }
-      if (!isValidJsWorkspaceFilename(name)) {
+      if (!isValidToolWorkspaceName(name, environment)) {
         return {
-          response: `Workspace only allows JavaScript files named with a ".js" extension (e.g. helpers.js). Ignored create_file for "${name}". Reply in plain text or retry with a valid .js filename and JavaScript-only content.`,
+          response: `Workspace only allows ${lang} files named with a "${ext}" extension. Ignored create_file for "${name}". Reply in plain text or retry with a valid filename and ${lang}-only content.`,
           toolCall: null,
         };
       }
@@ -86,9 +97,9 @@ export function parseAssistantModelOutput(raw) {
       if (!name) {
         return { response: trimmed, toolCall: null };
       }
-      if (!isValidJsWorkspaceFilename(name)) {
+      if (!isValidToolWorkspaceName(name, environment)) {
         return {
-          response: `Workspace only allows JavaScript files named with a ".js" extension. Ignored edit_file for "${name}". Use an existing path from the project list that ends in .js, or explain changes in plain text.`,
+          response: `Workspace only allows ${lang} files named with a "${ext}" extension. Ignored edit_file for "${name}". Use an existing path from the project list that ends in ${ext}, or explain changes in plain text.`,
           toolCall: null,
         };
       }

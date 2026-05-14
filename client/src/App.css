@@ -25,6 +25,46 @@
   gap: 0.55rem;
 }
 
+.workspace__env-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+}
+
+.workspace__env-btn {
+  appearance: none;
+  border: none;
+  margin: 0;
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border-radius: calc(var(--radius-md) - 3px);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.workspace__env-btn:hover:not(:disabled) {
+  color: var(--text-secondary);
+}
+
+.workspace__env-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workspace__env-btn--active {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
 .workspace__history-btns {
   display: flex;
   align-items: center;
@@ -194,6 +234,15 @@
   transition:
     border-color var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out);
+}
+
+.pane-header__pill--muted {
+  max-width: 5.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 /* —— File explorer —— */

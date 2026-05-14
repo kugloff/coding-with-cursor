@@ -6,8 +6,23 @@ import {
   GeminiConfigurationError,
   GeminiApiError,
 } from "./services/geminiService.js";
-import { normalizeChatMode, parseChatContext } from "./chatBody.js";
+import { normalizeChatMode, normalizeChatEnvironment, parseChatContext } from "./chatBody.js";
 import { executeJavaScript, MAX_RUN_CODE_CHARS } from "./runCode.js";
+import { executePython } from "./runPython.js";
+
+/**
+ * POST /run execution target: prefers `environment`, falls back to legacy `runtime`.
+ * @param {Record<string, unknown>} body
+ * @returns {"js" | "python"}
+ */
+function normalizeRunEnvironment(body) {
+  const rawEnv = typeof body?.environment === "string" ? body.environment.trim().toLowerCase() : "";
+  if (rawEnv === "python") return "python";
+  if (rawEnv === "js" || rawEnv === "javascript") return "js";
+  const rawRt = typeof body?.runtime === "string" ? body.runtime.trim().toLowerCase() : "";
+  if (rawRt === "python") return "python";
+  return "js";
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -33,18 +48,19 @@ app.get("/api/hello", (_req, res) => {
 
 app.post("/chat", async (req, res) => {
   const body = req.body ?? {};
-  const { message, files: rawFiles, currentFile: rawCurrentFile, mode: rawMode } = body;
+  const { message, files: rawFiles, currentFile: rawCurrentFile, mode: rawMode, environment: rawEnv } = body;
   const mode = normalizeChatMode(rawMode);
+  const environment = normalizeChatEnvironment(rawEnv);
 
   if (typeof message !== "string" || !message.trim()) {
     return res.status(400).json({
       error: "Invalid request body",
       detail:
-        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content, empty strings OK), "currentFile" (string | null, active editor path), "mode" ("chat" | "agent", default "chat").',
+        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content, empty strings OK), "currentFile" (string | null, active editor path), "mode" ("chat" | "agent", default "chat"), "environment" ("js" | "python", default "js" — must match the client workspace; keys must be *.js or *.py accordingly).',
     });
   }
 
-  const parsed = parseChatContext(rawFiles, rawCurrentFile);
+  const parsed = parseChatContext(rawFiles, rawCurrentFile, environment);
   if (!parsed.ok) {
     return res.status(400).json({
       error: "Invalid request body",
@@ -58,11 +74,13 @@ app.post("/chat", async (req, res) => {
       files: parsed.files,
       currentFile: parsed.currentFile,
       mode,
+      environment,
     });
     return res.json({
       response: result.response ?? "",
       toolCall: result.toolCall ?? null,
       mode,
+      environment,
     });
   } catch (err) {
     if (err instanceof GeminiConfigurationError) {
@@ -94,11 +112,13 @@ app.post("/chat", async (req, res) => {
 app.post("/run", (req, res) => {
   const body = req.body ?? {};
   const { code } = body;
+  const environment = normalizeRunEnvironment(body);
 
   if (typeof code !== "string") {
     return res.status(400).json({
       output: "",
-      error: 'Invalid request body: expected JSON with a string "code" field.',
+      error:
+        'Invalid request body: expected JSON with a string "code" field. Optional: "environment" ("js" | "python", default "js"); legacy "runtime" is accepted as a fallback.',
     });
   }
 
@@ -110,7 +130,8 @@ app.post("/run", (req, res) => {
   }
 
   try {
-    const { output, error } = executeJavaScript(code);
+    const { output, error } =
+      environment === "python" ? executePython(code) : executeJavaScript(code);
     return res.json({
       output: typeof output === "string" ? output : String(output ?? ""),
       error: typeof error === "string" ? error : String(error ?? ""),

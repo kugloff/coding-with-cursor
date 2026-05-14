@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowUp, Sparkles, User } from "lucide-react";
-import { isValidJsWorkspaceFilename } from "../workspaceFilename.js";
+import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "../workspaceFilename.js";
 
 export default function ChatPanel({
+  environment = "js",
   files = {},
   currentFile = null,
   onAiEditProposal,
@@ -14,6 +15,11 @@ export default function ChatPanel({
   const [pending, setPending] = useState(false);
   const listRef = useRef(null);
   const messageIdRef = useRef(0);
+
+  useEffect(() => {
+    setMessages([]);
+    setInput("");
+  }, [environment]);
 
   const appendMessage = useCallback((role, text) => {
     messageIdRef.current += 1;
@@ -42,6 +48,7 @@ export default function ChatPanel({
         files,
         currentFile: currentFile ?? null,
         mode: chatMode,
+        environment,
       };
 
       const res = await fetch("/chat", {
@@ -71,15 +78,19 @@ export default function ChatPanel({
       }
 
       const serverMode = data.mode === "agent" ? "agent" : "chat";
-      const allowStructuredTools = serverMode === "agent";
+      const serverEnvironment = data.environment === "python" ? "python" : "js";
+      const allowStructuredTools = serverMode === "agent" && serverEnvironment === environment;
 
       const tool = data.toolCall;
+      const validToolName =
+        environment === "python" ? isValidPyWorkspaceFilename : isValidJsWorkspaceFilename;
+
       const isEditTool =
         tool &&
         typeof tool === "object" &&
         tool.action === "edit_file" &&
         typeof tool.filename === "string" &&
-        isValidJsWorkspaceFilename(tool.filename) &&
+        validToolName(tool.filename) &&
         typeof tool.content === "string";
 
       const isCreateTool =
@@ -87,7 +98,7 @@ export default function ChatPanel({
         typeof tool === "object" &&
         tool.action === "create_file" &&
         typeof tool.filename === "string" &&
-        isValidJsWorkspaceFilename(tool.filename) &&
+        validToolName(tool.filename) &&
         typeof tool.content === "string";
 
       const isFileProposal = isEditTool || isCreateTool;
@@ -159,17 +170,30 @@ export default function ChatPanel({
             {chatMode === "chat" ? (
               <>
                 <strong>Chat mode</strong> — the assistant answers in natural language only; it does not apply file edits
-                or return structured tool JSON. You can still discuss your JavaScript workspace (every tab is a{" "}
-                <code>.js</code> file). Each request sends the <strong>project file list</strong>, the{" "}
-                <strong>active file name</strong>, and <strong>full file contents</strong> (within server limits). Set{" "}
-                <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
+                or return structured tool JSON. You can discuss the current{" "}
+                {environment === "python" ? (
+                  <>
+                    Python workspace (every tab is a <code>.py</code> file)
+                  </>
+                ) : (
+                  <>
+                    JavaScript workspace (every tab is a <code>.js</code> file)
+                  </>
+                )}
+                . Each request sends the <strong>project file list</strong>, the <strong>active file name</strong>, and{" "}
+                <strong>full file contents</strong> (within server limits). Set <code>GEMINI_API_KEY</code> in{" "}
+                <code>server/.env</code>.
               </>
             ) : (
               <>
                 <strong>Agent mode</strong> — the model returns only <code>edit_file</code> / <code>create_file</code>{" "}
-                JSON for valid <code>.js</code> names; a side-by-side diff opens first and nothing is saved until you
-                accept. Describe the change you want in plain language; the reply will not include conversational prose.
-                Same workspace context is sent as in Chat mode.
+                JSON for valid {environment === "python" ? (
+                  <code>.py</code>
+                ) : (
+                  <code>.js</code>
+                )}{" "}
+                names in this environment only; a side-by-side diff opens first and nothing is saved until you accept.
+                Describe the change you want in plain language; the reply will not include conversational prose.
               </>
             )}
           </p>
@@ -216,7 +240,9 @@ export default function ChatPanel({
       </div>
       <form className="chat-panel__composer" onSubmit={handleSend}>
         <label className="visually-hidden" htmlFor="chat-input">
-          Message
+          {chatMode === "agent"
+            ? "Edit request: describe the change you want. Enter sends; Shift+Enter adds a newline."
+            : "Message: Enter sends; Shift+Enter adds a newline."}
         </label>
         <div className="chat-panel__composer-inner">
           <textarea
@@ -225,7 +251,7 @@ export default function ChatPanel({
             rows={1}
             placeholder={
               chatMode === "agent"
-                ? "Describe the edit — Enter to send · Shift+Enter newline"
+                ? "Describe edit — Enter · Shift+Enter newline"
                 : "Ask AI — Enter to send · Shift+Enter newline"
             }
             value={input}

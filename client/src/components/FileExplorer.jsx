@@ -8,7 +8,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { workspaceJsBasenameForRename } from "../workspaceFilename.js";
+import { workspaceJsBasenameForRename, workspacePyBasenameForRename } from "../workspaceFilename.js";
 import { validateWorkspaceRename } from "../workspaceFileValidation.js";
 
 function FileGlyph() {
@@ -20,6 +20,7 @@ const CONTEXT_MENU_W = 168;
 const CONTEXT_MENU_H = 88;
 
 export default function FileExplorer({
+  environment = "js",
   paths,
   activePath,
   onSelect,
@@ -75,7 +76,9 @@ export default function FileExplorer({
 
   function beginRename(path) {
     setRenamingPath(path);
-    setRenameDraft(workspaceJsBasenameForRename(path));
+    setRenameDraft(
+      environment === "python" ? workspacePyBasenameForRename(path) : workspaceJsBasenameForRename(path),
+    );
   }
 
   function cancelRename() {
@@ -86,7 +89,7 @@ export default function FileExplorer({
   function commitRename(e) {
     e.preventDefault();
     if (!renamingPath) return;
-    const v = validateWorkspaceRename(renameDraft, paths, renamingPath);
+    const v = validateWorkspaceRename(renameDraft, paths, renamingPath, environment);
     if (!v.ok) {
       window.alert(v.message);
       return;
@@ -164,7 +167,10 @@ export default function FileExplorer({
           New file
         </button>
       </div>
-      <p className="file-explorer__note">Tabs persist in this browser (localStorage) — Reset clears save.</p>
+      <p className="file-explorer__note">
+        Tabs persist in this browser (localStorage) — JavaScript and Python workspaces are stored separately. Reset clears
+        both.
+      </p>
       <ul ref={listRef} className="file-explorer__list" aria-label="Files">
         {paths.length === 0 ? (
           <li className="file-explorer__empty">No files yet.</li>
@@ -172,6 +178,7 @@ export default function FileExplorer({
           paths.map((path) => {
             const isActive = path === activePath;
             const isRenaming = renamingPath === path;
+            const renameSuffix = environment === "python" ? ".py" : ".js";
 
             if (isRenaming) {
               return (
@@ -189,11 +196,11 @@ export default function FileExplorer({
                           cancelRename();
                         }
                       }}
-                      aria-label="File base name (extension stays .js)"
-                      title='Only the name before ".js" can change; any extension you type is ignored.'
+                      aria-label={`File base name (extension stays ${renameSuffix})`}
+                      title={`Only the name before "${renameSuffix}" can change; any extension you type is ignored.`}
                     />
                     <span className="file-explorer__rename-suffix" aria-hidden>
-                      .js
+                      {renameSuffix}
                     </span>
                     <div className="file-explorer__rename-actions">
                       <button type="submit" className="file-explorer__rename-save" aria-label="Save name">

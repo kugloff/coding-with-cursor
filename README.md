@@ -2,9 +2,11 @@ This is the system specification and intended behavior of the application.
 It describes how the system should work.
 For implementation history and changes, see: agent-memory.md
 
+**How this repository was built:** The project was developed using **Cursor** for implementation and coding, and **ChatGPT** plus **Google Gemini** for planning, design discussions, and prompt engineering.
+
 # Workspace documentation
 
-Browser-based **JavaScript workspace** (Monaco editor, in-memory `.js` files), **Google Gemini** chat with optional **`edit_file`** / **`create_file`** proposals, and **sandboxed** server-side **Run** for the active file. Stack: **Express** (`server/`) + **Vite + React 19** (`client/`).
+Browser-based **dual-environment workspace** (top bar **JavaScript** vs **Python**): each has its own in-memory files (**`*.js`** or **`*.py`** only), Monaco editor, Run output, undo/redo stacks, and AI chat context. **Google Gemini** chat supports **Chat** / **Agent** modes with tools scoped to the active environment. **Run** uses **`vm2`** for JS and a subprocess for Python. Stack: **Express** (`server/`) + **Vite + React 19** (`client/`).
 
 **Implementation history (append-only, factual):** [`agent-memory.md`](./agent-memory.md) — update **this** file when **behavior or spec** changes; append **`agent-memory.md`** only for **code** changes; do not duplicate the same detail in both (prefer **`agent-memory.md`** for implementation detail when unsure).
 
@@ -29,14 +31,15 @@ Browser-based **JavaScript workspace** (Monaco editor, in-memory `.js` files), *
 
 | Part | Path | Stack | Default URL |
 |------|------|-------|----------------|
-| API | `server/` | Node.js, Express, ESM, **vm2** for `POST /run` | http://localhost:3001 |
+| API | `server/` | Node.js, Express, ESM; **`vm2`** for JS **`POST /run`**; Python **`POST /run`** via subprocess | http://localhost:3001 |
 | UI | `client/` | React 19, Vite 6, Monaco, lucide-react | http://localhost:5173 |
 
 **High-level behavior**
 
-- **Explorer + Monaco:** Cursor-inspired dark UI; **`files`** and **`activePath`** live in React state as the source of truth and are **mirrored to `localStorage`** in the browser so a refresh restores the last workspace (or defaults if nothing valid is stored).
-- **AI chat:** Sends workspace context to **`POST /chat`** with a UI-selected **`mode`**: **Chat** (natural language only; no structured tools) or **Agent** (structured **`edit_file`** / **`create_file`** only) → diff modal → accept/reject when in Agent mode.
-- **Run:** Sends active **`.js`** buffer to **`POST /run`**; output and errors shown under the editor (panel can be minimized).
+- **Dual workspace:** The top bar **JavaScript** / **Python** switch selects **`environment`**: two isolated slices **`{ files, activePath }`**, not shared. Defaults: **`main.js`** (JS) and **`main.py`** (Python). Explorer, editor, Run, and chat only see the active slice. **Undo/redo** is tracked **per environment** (still in-memory only).
+- **Persistence:** Both slices plus the selected **`environment`** are saved under **`localStorage`** key **`llm:dualWorkspace:v1`**. A legacy **`llm:workspace:v1`** snapshot (JS-only) is migrated into the JS slice on first load if the dual key is absent. **Reset** restores default JS and Python workspaces and clears both undo stacks.
+- **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat** vs **Agent**). Server validates **`files`** / **`currentFile`** keys as **`*.js`** or **`*.py`** accordingly; Gemini prompts and tool parsing are **environment-scoped** so the model must not emit cross-environment filenames.
+- **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.3).
 
 **Gemini:** `@google/generative-ai`, model name in **`MODEL_NAME`** inside `server/services/geminiService.js` (e.g. **`gemini-2.5-flash`**). API key: **`GEMINI_API_KEY`**.
 
@@ -44,7 +47,7 @@ Browser-based **JavaScript workspace** (Monaco editor, in-memory `.js` files), *
 
 ## 2. Quick start
 
-**Prerequisites:** Node.js **18+** recommended.
+**Prerequisites:** Node.js **18+** recommended. **Optional:** Python **3** installed and on **`PATH`** (or **`PYTHON_BIN`** set) if you use the **Python** Run runtime.
 
 From the **repository root**:
 
@@ -82,7 +85,9 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 | `PORT` | `3001` | API listen port |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | CORS allowed origin |
 | `GEMINI_API_KEY` | _(required for chat)_ | Gemini API key |
-| `RUN_VM_TIMEOUT_MS` | `1000` | `POST /run` wall-clock timeout (ms), clamped **1–60000**; read when `runCode.js` loads (**restart** after change) |
+| `RUN_VM_TIMEOUT_MS` | `1000` | **`environment: "js"`** on **`POST /run`** — wall-clock timeout (ms) for **`vm2`**, clamped **1–60000**; read when `runCode.js` loads (**restart** after change) |
+| `RUN_PYTHON_TIMEOUT_MS` | _(falls back to `RUN_VM_TIMEOUT_MS`)_ | **`environment: "python"`** — subprocess wall-clock timeout (ms), clamped **1–60000** |
+| `PYTHON_BIN` | `python` on Windows, `python3` elsewhere | **`environment: "python"`** — executable passed to **`spawnSync`** |
 
 **Tracked template:** `server/.env.example` (never commit real secrets).
 
@@ -90,39 +95,37 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 
 ## 4. Using the application
 
-### 4.1 Virtual workspace (JavaScript-only)
+### 4.1 Dual environment (JavaScript vs Python)
 
-- Explorer tabs are **only** `*.js` single-segment names (e.g. `main.js`, `untitled-1.js`). This is **not** the same as repo UI files (those may use `.jsx` for React).
-- **New file:** `untitled-N.js` with starter `// New file\n`.
-- **Rename:** Edit the **base name** only; a fixed **`.js`** suffix is shown; any typed extension is normalized away.
-- **Persistence:** On each workspace change, the app writes **`files`** and **`activePath`** to **`localStorage`** (key `llm:workspace:v1`). On load, that snapshot is restored if it parses and passes workspace path rules; otherwise built-in **`DEFAULT_FILES`** / **`main.js`** are used. **Undo/redo stacks are not persisted** (in-memory only per session).
-- **Reset:** Top bar **Reset** clears the storage key, restores default files, clears undo/redo, and bumps the editor so Monaco reloads.
-- **Delete / Undo / Redo:** As in the workspace table below.
+- **JavaScript workspace:** Explorer tabs are **only** `*.js` single-segment names (e.g. `main.js`, `untitled-1.js`). **New file:** `untitled-N.js` with starter `// New file\n`. **Rename:** base name + fixed **`.js`** suffix in the UI.
+- **Python workspace:** Same rules with **`*.py`** (e.g. `main.py`, `untitled-1.py`), starter **`# New file\n`**, and **`.py`** rename suffix.
+- The two workspaces **do not share** `files` or `activePath`. Switching the top bar environment swaps the entire editor + explorer + run context. **Chat** threads reset when you switch (in-memory messages per visit to each environment).
+- **Delete:** You cannot delete the **last** file in an environment (a workspace must keep at least one tab).
 
 ### 4.2 Editor and Run
 
-- Monaco language mode is **JavaScript** for valid workspace paths.
-- **Run** (header): posts current file text to **`POST /run`**; **Output** shows captured **`console.*`** and errors. **Output** can be **minimized** with the header chevron; **Run** re-expands the panel.
+- Monaco language follows the **active environment** and file extension (**JavaScript** or **Python**). The editor header shows the active filename and a small **JS** / **Python** badge mirroring the top bar.
+- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). Output semantics are unchanged from §5.3 (JS **`console.*`**, Python **stdout** / **stderr**).
 
 ### 4.3 AI chat and file proposals
 
-- The chat panel has **Chat** and **Agent** modes (toggle in the header). Every request includes **`mode`**: **`"chat"`** (default) or **`"agent"`**.
-- **Chat mode:** The server never parses or applies tool JSON; replies are natural language (Markdown allowed). The client ignores any **`toolCall`** field for defense in depth.
-- **Agent mode:** The model must return a single valid **`edit_file`** or **`create_file`** JSON object (no conversational wrapper). Valid payloads open **`AiEditPreviewModal`** (Monaco diff). **Accept** updates `files`, **`activePath`**, **`editorNonce`**, and shows a toast. **Reject** / **Escape** discards. Invalid or non-tool output returns an API error.
-- Composer sends **`message`**, full **`files`** map, **`currentFile`**, and **`mode`** to **`POST /chat`**.
+- The chat panel has **Chat** and **Agent** modes (toggle in the header). Every request includes **`mode`**: **`"chat"`** (default) or **`"agent"`**, and **`environment`**: **`"js"`** (default) or **`"python"`** (must match the UI workspace).
+- **Chat mode:** The server never parses or applies tool JSON; replies are natural language (Markdown allowed). The client ignores any **`toolCall`** unless **`mode`** and **`environment`** from the server match the request.
+- **Agent mode:** The model must return a single valid **`edit_file`** or **`create_file`** JSON object with paths ending in **`.js`** (when **`environment`** is JS) or **`.py`** (when Python). Valid payloads open **`AiEditPreviewModal`**. **Accept** updates only the **current** environment’s `files` / `activePath`.
+- Composer sends **`message`**, **`files`**, **`currentFile`**, **`mode`**, and **`environment`** to **`POST /chat`**.
 
 ### 4.4 Workspace state (reference)
 
 | Topic | Behavior |
 |-------|----------|
-| Storage | `useState` in `App.jsx` (`files`, `activePath`); mirrored to **`localStorage`** on change; hydrated on startup via `workspaceStorage.js`. |
-| Create | Next free `untitled-N.js`. |
-| Select | Sets `activePath`; explorer uses `aria-current` on active row. |
-| Delete | Confirm → remove key; pick next active or `null`; bump `editorNonce` if needed. |
-| Rename | Validators ensure `.js`, no dupes; `handleRenameFile` / `FileExplorer` use `workspaceFileValidation.js`. |
-| Editor | `value` = `files[activePath]`; `onChange` writes back live. |
-| Remount | `CodeEditor` `key` includes `editorNonce` after structural changes. |
-| Undo / redo | Max **40** snapshots per stack; `{ files, activePath }` shallow clone; typing burst groups one undo entry; redo cleared on new capture. |
+| Storage | `App.jsx` holds **`dualWorkspace`** `{ environment, js: { files, activePath }, python: { files, activePath } }`; persisted via **`workspaceStorage.js`** key **`llm:dualWorkspace:v1`**. |
+| Migrate | If **`llm:dualWorkspace:v1`** is missing, a legacy **`llm:workspace:v1`** object (JS-only) hydrates the **JS** slice; **Python** defaults to **`main.py`**. |
+| Create | Next free `untitled-N.js` or `untitled-N.py` depending on **`environment`**. |
+| Select | Sets **`activePath`** inside the active slice only. |
+| Delete | Confirm → remove key (not the last file); pick next active; bump `editorNonce` if needed. |
+| Rename | **`workspaceFileValidation.js`** enforces **`*.js`** or **`*.py`** per environment. |
+| Editor | `CodeEditor` **`key`** includes **`environment`** so Monaco remounts on environment switch. |
+| Undo / redo | Max **40** snapshots **per environment**; each snapshot is `{ files, activePath }` for that slice only. |
 
 Chat request flow:
 
@@ -132,11 +135,11 @@ sequenceDiagram
   participant Vite as Vite dev server
   participant API as Express /chat
   participant Gemini as Gemini API
-  UI->>Vite: POST /chat (body includes mode)
+  UI->>Vite: POST /chat (body includes mode + environment)
   Vite->>API: proxy :3001/chat
-  API->>Gemini: generateContent (prompt per mode)
+  API->>Gemini: generateContent (prompt per mode + environment)
   Gemini-->>API: text
-  API-->>UI: 200 response + toolCall + mode
+  API-->>UI: 200 response + toolCall + mode + environment
   UI->>UI: diff modal then merge or reject
 ```
 
@@ -150,15 +153,15 @@ sequenceDiagram
 |--------|------|----------------------|
 | GET | `/api/health` | `{ ok, service, timestamp }` |
 | GET | `/api/hello` | `{ message }` |
-| POST | `/chat` | `{ response: string, toolCall: null \| { action, filename, content }, mode: "chat" \| "agent" }` |
-| POST | `/run` | `{ output: string, error: string }` |
+| POST | `/chat` | `{ response, toolCall, mode, environment }` — see §5.2 |
+| POST | `/run` | `{ output, error }` from **`code`** + **`environment`** (legacy **`runtime`** accepted) |
 
 ### 5.2 `POST /chat`
 
 - **URLs:** `http://localhost:5173/chat` (proxied) or `http://localhost:3001/chat`
 - **Headers:** `Content-Type: application/json` (body limit **4 MB**)
-- **Body:** `message` (string, required). Optional `files` (≤200 keys, string→string), `currentFile` (string or null), **`mode`** (`"chat"` \| `"agent"`, default **`"chat"`**). Every **`files`** key and non-null **`currentFile`** must be a valid **`*.js`** workspace name (`parseChatContext` + `workspaceFileValidation.js`).
-- **200:** `response` (natural language in **Chat**; empty string when a valid tool is returned in **Agent**), `toolCall` (**always `null`** in **Chat**; in **Agent**, a validated **`edit_file`** / **`create_file`** object on success), and **`mode`** echoing the normalized value the server used (`normalizeChatMode` in `chatBody.js`).
+- **Body:** `message` (string, required). Optional **`files`** (≤200 keys), **`currentFile`** (string \| null), **`mode`** (`"chat"` \| `"agent"`, default **`"chat"`**), **`environment`** (`"js"` \| `"python"`, default **`"js"`**). Keys in **`files`** and **`currentFile`** must match the environment: **`*.js`** when **`environment`** is JS, **`*.py`** when Python (`parseChatContext` + `workspaceFileValidation.js`).
+- **200:** `response`, `toolCall`, **`mode`**, and **`environment`** (each echoing normalized server values).
 - **Chat mode:** The server does not run structured-output parsing for tools; the model is instructed not to emit **`edit_file`** / **`create_file`** JSON.
 - **Agent mode:** The server parses model text with `assistantOutput.js`; a reply without a valid tool payload is an error (**502** with `Gemini API error` / detail text).
 - **Errors:** JSON with `error` and usually `detail`; typical statuses **400**, **401/403**, **429**, **500**, **502** (see prior README behavior — missing key, rate limits, upstream failures).
@@ -166,9 +169,11 @@ sequenceDiagram
 ### 5.3 `POST /run`
 
 - **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
-- **Body:** `{ "code": string }` — max **`MAX_RUN_CODE_CHARS`** (500 000 in `runCode.js`).
-- **200:** `{ output, error }`. Code runs in **`vm2`** `VM` with **only** stub **`console`**; no **`require`**, **`process`**, **`fs`**, or network in the sandbox; **`eval: false`**, **`wasm: false`**, **`allowAsync: false`**; **`bufferAllocLimit`** 1 MiB; timeout **`RUN_TIMEOUT_MS`** (default **1000** ms).
-- **400 / 500:** Documented `{ output, error }` shapes where applicable.
+- **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** (default **`"js"`**). Legacy **`runtime`** is read if **`environment`** is omitted (same normalization). Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
+- **200:** **`{ output, error }`** (same shape). **`error`** may be non-empty on HTTP 200 (e.g. Python **`stderr`**, or JS exception after **`console`** capture).
+- **`environment: "js"`** (default): **`executeJavaScript`** in **`runCode.js`** — unchanged **`vm2`** sandbox (stub **`console`** only; **`eval`**, **`wasm`**, async disabled; **`RUN_TIMEOUT_MS`** from **`RUN_VM_TIMEOUT_MS`**).
+- **`environment: "python"`**: **`executePython`** in **`runPython.js`** — subprocess (**`-I -u -`**, script on stdin). **Not** a JS-class sandbox.
+- **400 / 500:** Same JSON **`{ output, error }`** shapes as today where applicable.
 
 ---
 
@@ -187,6 +192,7 @@ sequenceDiagram
 │   ├── workspaceFilename.js
 │   ├── workspaceFileValidation.js
 │   ├── runCode.js
+│   ├── runPython.js
 │   ├── .env.example
 │   └── services/
 │       └── geminiService.js
@@ -213,11 +219,11 @@ sequenceDiagram
 
 | File | Role |
 |------|------|
-| `App.jsx` | Workspace, undo/redo, Run/output, AI diff + toast, validation hooks |
+| `App.jsx` | Dual **`environment`**, two workspace slices, per-env undo/redo, Run/output, AI diff + toast |
 | `workspaceFilename.js` / `workspaceFileValidation.js` | Path policy and validators |
-| `workspaceStorage.js` | `localStorage` load / save / clear for `{ files, activePath }` |
-| `FileExplorer.jsx` | List, new file, rename (with `.js` suffix UI), delete, context menu |
-| `CodeEditor.jsx` | Monaco instance |
+| `workspaceStorage.js` | Dual-workspace **`localStorage`** (`llm:dualWorkspace:v1`), legacy **`llm:workspace:v1`** migration |
+| `FileExplorer.jsx` | List, new file, rename (**.js** / **.py** suffix UI per environment), delete |
+| `CodeEditor.jsx` | Monaco; **`key`** includes **`environment`** |
 | `ChatPanel.jsx` | Thread + `POST /chat` |
 | `AiEditPreviewModal.jsx` | Diff editor + accept/reject |
 
@@ -246,6 +252,7 @@ Output: **`client/dist/`**, including **`monacoeditorwork/`** for workers — de
 ## 8. Security and limitations
 
 - **`vm2` is unmaintained**; sandbox settings reduce accidental Node access and dynamic code paths but are **not** a guarantee against determined attackers. Use separate processes/containers for hostile or production execution.
+- **Python `POST /run`** uses a normal OS subprocess with **`-I`** (no user **`site-packages`**) but **full CPython** still has **`import os`**, sockets, and file access unless you add OS-level containment. **Do not** expose this endpoint to untrusted networks without additional hardening.
 - **Workspace data** in the browser is stored in **`localStorage`** (same-origin); treat tab contents as sensitive if you paste secrets. **Reset** or private browsing limits retention; there is no server-side file store unless you add one.
 - **Gemini** key must stay out of git; use **`server/.env`**.
 
@@ -262,9 +269,10 @@ Output: **`client/dist/`**, including **`monacoeditorwork/`** for workers — de
 | `POST /chat` 401/403 | Bad or disabled API key |
 | `POST /chat` 400 “files” | Invalid `files` / `currentFile` or non-`*.js` keys |
 | `POST /chat` 502 / “Agent mode: expected…” | **Agent** mode: model output was not exactly one valid **`edit_file`** / **`create_file`** JSON object |
-| `POST /run` 400 | Bad `code` type or over max length |
-| `POST /run` timeout message | Exceeded `RUN_TIMEOUT_MS` — shorten sync work or raise `RUN_VM_TIMEOUT_MS` and restart |
-| `POST /run` async / eval issues | `allowAsync: false`, `eval: false` — use simple synchronous scripts |
+| `POST /run` 400 | Bad **`code`** type, over max length, or malformed JSON |
+| `POST /run` timeout / killed | **JS:** exceeded **`RUN_TIMEOUT_MS`** — shorten work or raise **`RUN_VM_TIMEOUT_MS`** and restart. **Python:** exceeded **`RUN_PYTHON_TIMEOUT_MS`** (or VM fallback) — same idea. |
+| `POST /run` async / eval issues (**JS** only) | **`allowAsync: false`**, **`eval: false`** — use simple synchronous scripts |
+| `POST /run` “Python not found” | **Python** runtime: interpreter missing or wrong **`PYTHON_BIN`** |
 | Run disabled | No active `.js` tab |
 | Rename blocked | Invalid base name, separators, or duplicate after normalization |
 | Output “gone” | Output panel minimized — expand via chevron or Run |
@@ -285,7 +293,7 @@ When requesting changes, specify: **which side** (`server` / `client` / both), *
 | Chat / Gemini | `server/services/geminiService.js`, `assistantOutput.js`, `chatBody.js`, `ChatPanel.jsx`, `App.jsx` |
 | Workspace paths / validation | `workspaceFilename.js`, `workspaceFileValidation.js` (client + server), `FileExplorer.jsx`, `App.jsx` |
 | Browser workspace persistence | `workspaceStorage.js`, `App.jsx` (persist effect, **Reset**), `App.css` (reset button) |
-| Run sandbox | `server/runCode.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
+| Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
 | UI / Monaco | `App.css`, `index.css`, `CodeEditor.jsx`, `vite.config.js`, `index.html`, `public/favicon.svg` |
 
 Record **factual implementation changes** in [`agent-memory.md`](./agent-memory.md) (append-only).

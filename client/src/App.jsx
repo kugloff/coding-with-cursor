@@ -16,9 +16,7 @@ import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
 import AiEditPreviewModal from "./components/AiEditPreviewModal.jsx";
-import {
-  isValidJsWorkspaceFilename,
-} from "./workspaceFilename.js";
+import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "./workspaceFilename.js";
 import {
   validateWorkspaceAiFileTarget,
   validateWorkspaceCreate,
@@ -27,38 +25,30 @@ import {
 } from "./workspaceFileValidation.js";
 import {
   clearPersistedWorkspace,
-  loadPersistedWorkspace,
-  persistWorkspace,
+  getDefaultDualWorkspace,
+  loadPersistedDualWorkspace,
+  persistDualWorkspace,
 } from "./workspaceStorage.js";
 
-const DEFAULT_FILES = {
-  "main.js": `// Welcome — edit freely
-function greet(name) {
-  return \`Hello, \${name}!\`;
-}
-
-console.log(greet("Monaco"));
-`,
-};
+const MAX_UNDO = 40;
 
 function editorLanguageForWorkspacePath(filename) {
   if (!filename) return "javascript";
   return isValidJsWorkspaceFilename(filename) ? "javascript" : "plaintext";
 }
 
-function nextUntitledName(files) {
+function nextUntitledName(files, environment) {
+  const ext = environment === "python" ? ".py" : ".js";
   let n = 1;
-  let name = `untitled-${n}.js`;
+  let name = `untitled-${n}${ext}`;
   while (name in files) {
     n += 1;
-    name = `untitled-${n}.js`;
+    name = `untitled-${n}${ext}`;
   }
-  const v = validateWorkspaceCreate(name, files);
+  const v = validateWorkspaceCreate(name, files, environment);
   if (v.ok) return name;
-  return `untitled-${Date.now()}.js`;
+  return `untitled-${Date.now()}${ext}`;
 }
-
-const MAX_UNDO = 40;
 
 /** Shallow snapshot: new `files` object, same string values. */
 function cloneWorkspace(w) {
@@ -66,36 +56,41 @@ function cloneWorkspace(w) {
 }
 
 export default function App() {
-  const [workspace, setWorkspace] = useState(() => {
-    const loaded = loadPersistedWorkspace();
+  const [dualWorkspace, setDualWorkspace] = useState(() => {
+    const loaded = loadPersistedDualWorkspace();
     if (loaded) return loaded;
-    return { files: { ...DEFAULT_FILES }, activePath: "main.js" };
+    return getDefaultDualWorkspace();
   });
   const [editorNonce, setEditorNonce] = useState(0);
-  /** Pending AI `edit_file` — side-by-side diff before apply. */
   const [aiEditPreview, setAiEditPreview] = useState(null);
-  /** `null` = hidden; otherwise full toast line (e.g. File updated by AI: path). */
   const [aiEditToastFile, setAiEditToastFile] = useState(null);
   const [runOutput, setRunOutput] = useState("");
   const [runError, setRunError] = useState("");
   const [runPending, setRunPending] = useState(false);
   const [runOutputMinimized, setRunOutputMinimized] = useState(false);
   const toastTimerRef = useRef(null);
-  const undoStackRef = useRef([]);
-  const redoStackRef = useRef([]);
-  /** Bumps when undo or redo stacks change so the top bar re-renders. */
+  const undoByEnv = useRef({ js: [], python: [] });
+  const redoByEnv = useRef({ js: [], python: [] });
   const [historyTick, setHistoryTick] = useState(0);
-  /** One undo entry per “typing burst” per file until select / other op resets. */
   const manualEditGroupRef = useRef({ path: null, captured: false });
 
-  const workspaceRef = useRef(workspace);
+  const dualWorkspaceRef = useRef(dualWorkspace);
   useEffect(() => {
-    workspaceRef.current = workspace;
-  }, [workspace]);
+    dualWorkspaceRef.current = dualWorkspace;
+  }, [dualWorkspace]);
+
+  const workspaceRef = useRef({ files: {}, activePath: null });
+  const environment = dualWorkspace.environment;
+  const activeSlice = dualWorkspace[environment];
+  const { files, activePath } = activeSlice;
 
   useEffect(() => {
-    persistWorkspace(workspace);
-  }, [workspace]);
+    workspaceRef.current = activeSlice;
+  }, [activeSlice]);
+
+  useEffect(() => {
+    persistDualWorkspace(dualWorkspace);
+  }, [dualWorkspace]);
 
   useEffect(() => {
     return () => {
@@ -109,10 +104,11 @@ export default function App() {
 
   const pushUndoSnapshot = useCallback(
     (snapshot) => {
-      redoStackRef.current = [];
-      const stack = undoStackRef.current;
+      const e = dualWorkspaceRef.current.environment;
+      redoByEnv.current[e] = [];
+      const stack = undoByEnv.current[e];
       const next = [...stack, snapshot];
-      undoStackRef.current = next.length > MAX_UNDO ? next.slice(-MAX_UNDO) : next;
+      undoByEnv.current[e] = next.length > MAX_UNDO ? next.slice(-MAX_UNDO) : next;
       bumpHistoryUi();
     },
     [bumpHistoryUi],
@@ -123,49 +119,51 @@ export default function App() {
   }, []);
 
   const handleUndo = useCallback(() => {
-    const stack = undoStackRef.current;
+    const e = dualWorkspaceRef.current.environment;
+    const stack = undoByEnv.current[e];
     if (stack.length === 0) return;
-    const current = cloneWorkspace(workspaceRef.current);
+    const current = cloneWorkspace(dualWorkspaceRef.current[e]);
     const previous = stack[stack.length - 1];
-    undoStackRef.current = stack.slice(0, -1);
-    const rstack = redoStackRef.current;
+    undoByEnv.current[e] = stack.slice(0, -1);
+    const rstack = redoByEnv.current[e];
     const rnext = [...rstack, current];
-    redoStackRef.current = rnext.length > MAX_UNDO ? rnext.slice(-MAX_UNDO) : rnext;
+    redoByEnv.current[e] = rnext.length > MAX_UNDO ? rnext.slice(-MAX_UNDO) : rnext;
     bumpHistoryUi();
     resetManualEditGroup();
-    setWorkspace(previous);
+    setDualWorkspace((dw) => ({ ...dw, [e]: previous }));
     setEditorNonce((n) => n + 1);
   }, [bumpHistoryUi, resetManualEditGroup]);
 
   const handleRedo = useCallback(() => {
-    const stack = redoStackRef.current;
+    const e = dualWorkspaceRef.current.environment;
+    const stack = redoByEnv.current[e];
     if (stack.length === 0) return;
-    const current = cloneWorkspace(workspaceRef.current);
+    const current = cloneWorkspace(dualWorkspaceRef.current[e]);
     const nextState = stack[stack.length - 1];
-    redoStackRef.current = stack.slice(0, -1);
-    const ustack = undoStackRef.current;
+    redoByEnv.current[e] = stack.slice(0, -1);
+    const ustack = undoByEnv.current[e];
     const unext = [...ustack, current];
-    undoStackRef.current = unext.length > MAX_UNDO ? unext.slice(-MAX_UNDO) : unext;
+    undoByEnv.current[e] = unext.length > MAX_UNDO ? unext.slice(-MAX_UNDO) : unext;
     bumpHistoryUi();
     resetManualEditGroup();
-    setWorkspace(nextState);
+    setDualWorkspace((dw) => ({ ...dw, [e]: nextState }));
     setEditorNonce((n) => n + 1);
   }, [bumpHistoryUi, resetManualEditGroup]);
 
   const handleResetWorkspace = useCallback(() => {
     if (
       !window.confirm(
-        "Reset workspace to default files? This removes the saved copy in this browser and clears undo/redo.",
+        "Reset both JavaScript and Python workspaces to defaults? This removes the saved copy in this browser and clears undo/redo for both environments.",
       )
     ) {
       return;
     }
     clearPersistedWorkspace();
-    undoStackRef.current = [];
-    redoStackRef.current = [];
+    undoByEnv.current = { js: [], python: [] };
+    redoByEnv.current = { js: [], python: [] };
     bumpHistoryUi();
     resetManualEditGroup();
-    setWorkspace({ files: { ...DEFAULT_FILES }, activePath: "main.js" });
+    setDualWorkspace(getDefaultDualWorkspace());
     setEditorNonce((n) => n + 1);
     setAiEditPreview(null);
     setRunOutput("");
@@ -182,21 +180,34 @@ export default function App() {
     }, 3200);
   }, []);
 
-  const { files, activePath } = workspace;
   const sortedPaths = useMemo(() => Object.keys(files).sort((a, b) => a.localeCompare(b)), [files]);
 
   const editorValue = activePath ? files[activePath] ?? "" : "";
-  const editorLanguage = editorLanguageForWorkspacePath(activePath);
-  const canRunJavaScript = Boolean(activePath && isValidJsWorkspaceFilename(activePath));
+  const editorLanguage =
+    environment === "python"
+      ? isValidPyWorkspaceFilename(activePath)
+        ? "python"
+        : "plaintext"
+      : editorLanguageForWorkspacePath(activePath);
+
+  const canRunCode = Boolean(
+    activePath &&
+      (environment === "python" ? isValidPyWorkspaceFilename(activePath) : isValidJsWorkspaceFilename(activePath)),
+  );
 
   useEffect(() => {
     setRunOutput("");
     setRunError("");
-  }, [activePath]);
+  }, [activePath, environment]);
 
   const handleRunCode = useCallback(async () => {
-    if (!activePath || !isValidJsWorkspaceFilename(activePath)) return;
-    const code = typeof files[activePath] === "string" ? files[activePath] : "";
+    const env = dualWorkspaceRef.current.environment;
+    const slice = dualWorkspaceRef.current[env];
+    const ap = slice.activePath;
+    if (!ap) return;
+    if (env === "python" && !isValidPyWorkspaceFilename(ap)) return;
+    if (env === "js" && !isValidJsWorkspaceFilename(ap)) return;
+    const code = typeof slice.files[ap] === "string" ? slice.files[ap] : "";
     setRunPending(true);
     setRunOutputMinimized(false);
     setRunError("");
@@ -205,7 +216,7 @@ export default function App() {
       const res = await fetch("/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, environment: env }),
       });
       let data = {};
       const raw = await res.text();
@@ -229,12 +240,13 @@ export default function App() {
     } finally {
       setRunPending(false);
     }
-  }, [activePath, files]);
+  }, []);
 
   const handleEditorChange = useCallback(
     (value) => {
       const next = value ?? "";
-      const w = workspaceRef.current;
+      const e = dualWorkspaceRef.current.environment;
+      const w = dualWorkspaceRef.current[e];
       if (!w.activePath) return;
       const path = w.activePath;
       const g = manualEditGroupRef.current;
@@ -242,9 +254,12 @@ export default function App() {
         pushUndoSnapshot(cloneWorkspace(w));
         manualEditGroupRef.current = { path, captured: true };
       }
-      setWorkspace((cur) => ({
-        ...cur,
-        files: { ...cur.files, [path]: next },
+      setDualWorkspace((dw) => ({
+        ...dw,
+        [e]: {
+          ...dw[e],
+          files: { ...dw[e].files, [path]: next },
+        },
       }));
     },
     [pushUndoSnapshot],
@@ -252,98 +267,133 @@ export default function App() {
 
   const handleSelectFile = useCallback((path) => {
     resetManualEditGroup();
-    setWorkspace((w) => {
-      if (!(path in w.files)) return w;
-      return { ...w, activePath: path };
+    setDualWorkspace((dw) => {
+      const e = dw.environment;
+      const w = dw[e];
+      if (!(path in w.files)) return dw;
+      return { ...dw, [e]: { ...w, activePath: path } };
     });
   }, [resetManualEditGroup]);
 
   const handleCreateFile = useCallback(() => {
-    pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
+    const e = dualWorkspaceRef.current.environment;
+    pushUndoSnapshot(cloneWorkspace(dualWorkspaceRef.current[e]));
     resetManualEditGroup();
-    setWorkspace((w) => {
-      const name = nextUntitledName(w.files);
+    setDualWorkspace((dw) => {
+      const cur = dw[dw.environment];
+      const name = nextUntitledName(cur.files, dw.environment);
+      const starter = dw.environment === "python" ? "# New file\n" : "// New file\n";
       return {
-        files: { ...w.files, [name]: "// New file\n" },
-        activePath: name,
+        ...dw,
+        [dw.environment]: {
+          files: { ...cur.files, [name]: starter },
+          activePath: name,
+        },
       };
     });
   }, [pushUndoSnapshot, resetManualEditGroup]);
 
-  const handleDeleteFile = useCallback((path) => {
-    const w = workspaceRef.current;
-    const del = validateWorkspaceExistingPath(path, w.files);
-    if (!del.ok) return;
-    if (!window.confirm(`Delete "${del.filename}"?`)) return;
-    pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
-    resetManualEditGroup();
-    setWorkspace((w) => {
-      if (!(del.filename in w.files)) return w;
-      const { [del.filename]: removed, ...rest } = w.files;
-      void removed;
-      const keys = Object.keys(rest).sort((a, b) => a.localeCompare(b));
-      const nextActive = w.activePath === del.filename ? keys[0] ?? null : w.activePath;
-      return { files: rest, activePath: nextActive };
-    });
-    setEditorNonce((n) => n + 1);
-  }, [pushUndoSnapshot, resetManualEditGroup]);
+  const handleDeleteFile = useCallback(
+    (path) => {
+      const e = dualWorkspaceRef.current.environment;
+      const w = dualWorkspaceRef.current[e];
+      if (Object.keys(w.files).length <= 1) {
+        window.alert("Cannot delete the last file in this workspace.");
+        return;
+      }
+      const del = validateWorkspaceExistingPath(path, w.files, e);
+      if (!del.ok) return;
+      if (!window.confirm(`Delete "${del.filename}"?`)) return;
+      pushUndoSnapshot(cloneWorkspace(w));
+      resetManualEditGroup();
+      setDualWorkspace((dw) => {
+        const cur = dw[e];
+        if (!(del.filename in cur.files)) return dw;
+        const { [del.filename]: removed, ...rest } = cur.files;
+        void removed;
+        const keys = Object.keys(rest).sort((a, b) => a.localeCompare(b));
+        const nextActive = cur.activePath === del.filename ? keys[0] ?? null : cur.activePath;
+        return { ...dw, [e]: { files: rest, activePath: nextActive } };
+      });
+      setEditorNonce((n) => n + 1);
+    },
+    [pushUndoSnapshot, resetManualEditGroup],
+  );
 
-  const handleRenameFile = useCallback((oldPath, newPath) => {
-    const w = workspaceRef.current;
-    const v = validateWorkspaceRenameTarget(oldPath, newPath, w.files);
-    if (!v.ok) return false;
-    const next = v.filename;
-    if (next === oldPath) return true;
-    pushUndoSnapshot(cloneWorkspace(w));
-    resetManualEditGroup();
-    const content = w.files[oldPath];
-    const { [oldPath]: _, ...rest } = w.files;
-    setWorkspace({
-      files: { ...rest, [next]: content },
-      activePath: w.activePath === oldPath ? next : w.activePath,
-    });
-    return true;
-  }, [pushUndoSnapshot, resetManualEditGroup]);
+  const handleRenameFile = useCallback(
+    (oldPath, newPath) => {
+      const e = dualWorkspaceRef.current.environment;
+      const w = dualWorkspaceRef.current[e];
+      const v = validateWorkspaceRenameTarget(oldPath, newPath, w.files, e);
+      if (!v.ok) return false;
+      const next = v.filename;
+      if (next === oldPath) return true;
+      pushUndoSnapshot(cloneWorkspace(w));
+      resetManualEditGroup();
+      const content = w.files[oldPath];
+      const { [oldPath]: _, ...rest } = w.files;
+      setDualWorkspace((dw) => ({
+        ...dw,
+        [e]: {
+          files: { ...rest, [next]: content },
+          activePath: w.activePath === oldPath ? next : w.activePath,
+        },
+      }));
+      return true;
+    },
+    [pushUndoSnapshot, resetManualEditGroup],
+  );
 
-  const applyAiFileEdit = useCallback((tool) => {
-    if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
-    const w = workspaceRef.current;
-    const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
-    const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action);
-    if (!v.ok) return;
-    const filename = v.filename;
-    if (typeof tool.content !== "string") return;
-    pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
-    resetManualEditGroup();
-    setWorkspace((w) => ({
-      ...w,
-      files: { ...w.files, [filename]: tool.content },
-      activePath: filename,
-    }));
-    setEditorNonce((n) => n + 1);
-    const toastMsg =
-      tool.action === "create_file"
-        ? `File created by AI: ${filename}`
-        : `File updated by AI: ${filename}`;
-    showAiEditToast(toastMsg);
-  }, [pushUndoSnapshot, resetManualEditGroup, showAiEditToast]);
+  const applyAiFileEdit = useCallback(
+    (tool) => {
+      if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
+      const e = dualWorkspaceRef.current.environment;
+      const w = dualWorkspaceRef.current[e];
+      const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
+      const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action, e);
+      if (!v.ok) return;
+      const filename = v.filename;
+      if (typeof tool.content !== "string") return;
+      pushUndoSnapshot(cloneWorkspace(w));
+      resetManualEditGroup();
+      setDualWorkspace((dw) => ({
+        ...dw,
+        [e]: {
+          ...dw[e],
+          files: { ...dw[e].files, [filename]: tool.content },
+          activePath: filename,
+        },
+      }));
+      setEditorNonce((n) => n + 1);
+      const toastMsg =
+        tool.action === "create_file"
+          ? `File created by AI: ${filename}`
+          : `File updated by AI: ${filename}`;
+      showAiEditToast(toastMsg);
+    },
+    [pushUndoSnapshot, resetManualEditGroup, showAiEditToast],
+  );
 
-  const handleAiEditProposal = useCallback((tool) => {
-    if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
-    const w = workspaceRef.current;
-    const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
-    const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action);
-    if (!v.ok) return;
-    const filename = v.filename;
-    if (typeof tool.content !== "string") return;
-    const original = filename in w.files ? w.files[filename] ?? "" : "";
-    setAiEditPreview({
-      filename,
-      original,
-      modified: tool.content,
-      action: tool.action,
-    });
-  }, []);
+  const handleAiEditProposal = useCallback(
+    (tool) => {
+      if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
+      const e = dualWorkspaceRef.current.environment;
+      const w = dualWorkspaceRef.current[e];
+      const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
+      const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action, e);
+      if (!v.ok) return;
+      const filename = v.filename;
+      if (typeof tool.content !== "string") return;
+      const original = filename in w.files ? w.files[filename] ?? "" : "";
+      setAiEditPreview({
+        filename,
+        original,
+        modified: tool.content,
+        action: tool.action,
+      });
+    },
+    [],
+  );
 
   const handleAcceptAiEditPreview = useCallback(() => {
     if (!aiEditPreview) return;
@@ -359,13 +409,27 @@ export default function App() {
     setAiEditPreview(null);
   }, []);
 
-  const aiPreviewLanguage = useMemo(
-    () => (aiEditPreview ? editorLanguageForWorkspacePath(aiEditPreview.filename) : "plaintext"),
-    [aiEditPreview],
-  );
+  const aiPreviewLanguage = useMemo(() => {
+    if (!aiEditPreview) return "plaintext";
+    if (environment === "python") {
+      return isValidPyWorkspaceFilename(aiEditPreview.filename) ? "python" : "plaintext";
+    }
+    return editorLanguageForWorkspacePath(aiEditPreview.filename);
+  }, [aiEditPreview, environment]);
 
-  const canUndo = useMemo(() => undoStackRef.current.length > 0, [historyTick]);
-  const canRedo = useMemo(() => redoStackRef.current.length > 0, [historyTick]);
+  const setEnvironment = useCallback((next) => {
+    const n = next === "python" ? "python" : "js";
+    setDualWorkspace((dw) => {
+      if (dw.environment === n) return dw;
+      return { ...dw, environment: n };
+    });
+    resetManualEditGroup();
+    setRunOutput("");
+    setRunError("");
+  }, [resetManualEditGroup]);
+
+  const canUndo = useMemo(() => undoByEnv.current[dualWorkspace.environment].length > 0, [historyTick, dualWorkspace.environment]);
+  const canRedo = useMemo(() => redoByEnv.current[dualWorkspace.environment].length > 0, [historyTick, dualWorkspace.environment]);
 
   return (
     <div className="workspace">
@@ -377,6 +441,26 @@ export default function App() {
           <span className="workspace__title">Workspace</span>
         </div>
         <div className="workspace__topbar-right">
+          <div className="workspace__env-toggle" role="group" aria-label="Workspace environment">
+            <button
+              type="button"
+              className={`workspace__env-btn${environment === "js" ? " workspace__env-btn--active" : ""}`}
+              onClick={() => setEnvironment("js")}
+              disabled={runPending}
+              aria-pressed={environment === "js"}
+            >
+              JavaScript
+            </button>
+            <button
+              type="button"
+              className={`workspace__env-btn${environment === "python" ? " workspace__env-btn--active" : ""}`}
+              onClick={() => setEnvironment("python")}
+              disabled={runPending}
+              aria-pressed={environment === "python"}
+            >
+              Python
+            </button>
+          </div>
           <div className="workspace__history-btns" role="group" aria-label="Workspace history">
             <button
               type="button"
@@ -402,7 +486,7 @@ export default function App() {
               type="button"
               className="workspace__history-btn workspace__history-btn--reset"
               onClick={handleResetWorkspace}
-              title="Clear browser save and restore default workspace (undo history cleared)"
+              title="Clear browser save and restore default workspaces (undo history cleared)"
             >
               <RotateCcw size={14} strokeWidth={2} aria-hidden />
               Reset
@@ -424,6 +508,7 @@ export default function App() {
             </h2>
           </div>
           <FileExplorer
+            environment={environment}
             paths={sortedPaths}
             activePath={activePath}
             onSelect={handleSelectFile}
@@ -443,15 +528,22 @@ export default function App() {
               <span className="pane-header__pill" title={activePath || ""}>
                 {activePath || "—"}
               </span>
+              <span className="pane-header__pill pane-header__pill--muted" title="Active workspace environment">
+                {environment === "python" ? "Python" : "JS"}
+              </span>
               <button
                 type="button"
                 className="editor-run-btn"
                 onClick={handleRunCode}
-                disabled={!canRunJavaScript || runPending}
+                disabled={!canRunCode || runPending}
                 title={
-                  canRunJavaScript
-                    ? "Run current JavaScript on the server (sandboxed)"
-                    : "Open a .js file to run"
+                  !canRunCode
+                    ? environment === "python"
+                      ? "Open a .py file to run"
+                      : "Open a .js file to run"
+                    : environment === "python"
+                      ? "Run active file as Python on the server (subprocess; treat as untrusted)"
+                      : "Run active file as JavaScript on the server (vm2 sandbox)"
                 }
               >
                 <Play size={14} strokeWidth={2} aria-hidden />
@@ -463,6 +555,7 @@ export default function App() {
             <CodeEditor
               path={activePath}
               editorNonce={editorNonce}
+              environment={environment}
               value={editorValue}
               onChange={handleEditorChange}
               language={editorLanguage}
@@ -470,7 +563,7 @@ export default function App() {
             <div
               className={`run-output${runOutputMinimized ? " run-output--minimized" : ""}`}
               role="region"
-              aria-label="JavaScript run output"
+              aria-label={environment === "python" ? "Python run output" : "JavaScript run output"}
               aria-expanded={!runOutputMinimized}
             >
               <div className="run-output__head">
@@ -493,7 +586,11 @@ export default function App() {
                 <div className="run-output__body-wrap">
                   {runPending && <p className="run-output__placeholder">Running…</p>}
                   {!runPending && !runOutput && !runError && (
-                    <p className="run-output__placeholder">Run sends the active file to the server and shows stdout here.</p>
+                    <p className="run-output__placeholder">
+                      {environment === "python"
+                        ? "Run sends the active .py tab to the server; stdout and stderr appear below."
+                        : "Run sends the active .js file as JavaScript; captured console output appears below."}
+                    </p>
                   )}
                   {runError ? (
                     <pre className="run-output__pre run-output__pre--error">{runError}</pre>
@@ -513,6 +610,7 @@ export default function App() {
             </h2>
           </div>
           <ChatPanel
+            environment={environment}
             files={files}
             currentFile={activePath}
             onAiEditProposal={handleAiEditProposal}

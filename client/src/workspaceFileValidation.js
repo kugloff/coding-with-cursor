@@ -1,6 +1,8 @@
 import {
   isValidJsWorkspaceFilename,
+  isValidPyWorkspaceFilename,
   normalizedJsWorkspaceRenameFromDraft,
+  normalizedPyWorkspaceRenameFromDraft,
 } from "./workspaceFilename.js";
 
 /**
@@ -21,11 +23,28 @@ function pathSet(filesOrPaths) {
 }
 
 /**
- * Non-empty, no path separators, max length, ends with `.js`.
+ * @param {"js" | "python"} environment
+ */
+function isValidName(name, environment) {
+  return environment === "python" ? isValidPyWorkspaceFilename(name) : isValidJsWorkspaceFilename(name);
+}
+
+/**
+ * @param {string} draft
+ * @param {"js" | "python"} environment
+ */
+function normalizedRenameFromDraft(draft, environment) {
+  return environment === "python"
+    ? normalizedPyWorkspaceRenameFromDraft(draft)
+    : normalizedJsWorkspaceRenameFromDraft(draft);
+}
+
+/**
  * @param {unknown} name
+ * @param {"js" | "python"} [environment]
  * @returns {{ ok: true, filename: string } | { ok: false, message: string }}
  */
-export function validateWorkspaceFilename(name) {
+export function validateWorkspaceFilename(name, environment = "js") {
   if (typeof name !== "string" || !name.trim()) {
     return { ok: false, message: "Filename cannot be empty." };
   }
@@ -36,19 +55,23 @@ export function validateWorkspaceFilename(name) {
   if (/[/\\]/.test(t)) {
     return { ok: false, message: 'Filename cannot contain "/" or "\\".' };
   }
-  if (!isValidJsWorkspaceFilename(t)) {
-    return { ok: false, message: 'Workspace files must be a single name ending in ".js".' };
+  if (!isValidName(t, environment)) {
+    const ext = environment === "python" ? ".py" : ".js";
+    return {
+      ok: false,
+      message: `Workspace files must be a single name ending in "${ext}".`,
+    };
   }
   return { ok: true, filename: t };
 }
 
 /**
- * Valid `.js` name and not already present (for create / AI create_file).
  * @param {unknown} name
  * @param {Record<string, string> | string[]} filesOrPaths
+ * @param {"js" | "python"} [environment]
  */
-export function validateWorkspaceCreate(name, filesOrPaths) {
-  const base = validateWorkspaceFilename(name);
+export function validateWorkspaceCreate(name, filesOrPaths, environment = "js") {
+  const base = validateWorkspaceFilename(name, environment);
   if (!base.ok) return base;
   if (pathSet(filesOrPaths).has(base.filename)) {
     return { ok: false, message: `A file named "${base.filename}" already exists.` };
@@ -57,12 +80,12 @@ export function validateWorkspaceCreate(name, filesOrPaths) {
 }
 
 /**
- * Valid `.js` name and must exist (optional guard for delete / strict edit).
  * @param {unknown} name
  * @param {Record<string, string>} files
+ * @param {"js" | "python"} [environment]
  */
-export function validateWorkspaceExistingPath(name, files) {
-  const base = validateWorkspaceFilename(name);
+export function validateWorkspaceExistingPath(name, files, environment = "js") {
+  const base = validateWorkspaceFilename(name, environment);
   if (!base.ok) return base;
   if (!(base.filename in files)) {
     return { ok: false, message: `No file named "${base.filename}" in the workspace.` };
@@ -71,23 +94,22 @@ export function validateWorkspaceExistingPath(name, files) {
 }
 
 /**
- * Rename: normalize draft to `*.js`, block duplicates, allow no-op same name.
  * @param {unknown} draft
  * @param {Record<string, string> | string[]} filesOrPaths
  * @param {string} oldPath
+ * @param {"js" | "python"} [environment]
  */
-export function validateWorkspaceRename(draft, filesOrPaths, oldPath) {
+export function validateWorkspaceRename(draft, filesOrPaths, oldPath, environment = "js") {
   const set = pathSet(filesOrPaths);
   if (typeof oldPath !== "string" || !oldPath.trim() || !set.has(oldPath)) {
     return { ok: false, message: "Original file is not in the workspace." };
   }
-  const next = normalizedJsWorkspaceRenameFromDraft(
-    typeof draft === "string" ? draft : "",
-  );
+  const next = normalizedRenameFromDraft(typeof draft === "string" ? draft : "", environment);
+  const ext = environment === "python" ? ".py" : ".js";
   if (!next) {
     return {
       ok: false,
-      message: 'Enter a valid base name. The ".js" extension cannot be removed or replaced.',
+      message: `Enter a valid base name. The "${ext}" extension cannot be removed or replaced.`,
     };
   }
   if (next === oldPath) return { ok: true, filename: next };
@@ -98,17 +120,17 @@ export function validateWorkspaceRename(draft, filesOrPaths, oldPath) {
 }
 
 /**
- * Validate a rename after the new name is already normalized (defense in `handleRenameFile`).
  * @param {string} oldPath
  * @param {unknown} newResolvedName
  * @param {Record<string, string>} files
+ * @param {"js" | "python"} [environment]
  */
-export function validateWorkspaceRenameTarget(oldPath, newResolvedName, files) {
+export function validateWorkspaceRenameTarget(oldPath, newResolvedName, files, environment = "js") {
   const set = pathSet(files);
   if (typeof oldPath !== "string" || !oldPath.trim() || !set.has(oldPath)) {
     return { ok: false, message: "Original file is not in the workspace." };
   }
-  const base = validateWorkspaceFilename(newResolvedName);
+  const base = validateWorkspaceFilename(newResolvedName, environment);
   if (!base.ok) return base;
   if (base.filename === oldPath) return { ok: true, filename: base.filename };
   if (set.has(base.filename)) {
@@ -118,14 +140,14 @@ export function validateWorkspaceRenameTarget(oldPath, newResolvedName, files) {
 }
 
 /**
- * Apply AI file tool: enforce name rules; block duplicate on create only.
  * @param {unknown} filename
  * @param {Record<string, string>} files
  * @param {"create_file" | "edit_file"} action
+ * @param {"js" | "python"} [environment]
  */
-export function validateWorkspaceAiFileTarget(filename, files, action) {
+export function validateWorkspaceAiFileTarget(filename, files, action, environment = "js") {
   if (action === "create_file") {
-    return validateWorkspaceCreate(filename, files);
+    return validateWorkspaceCreate(filename, files, environment);
   }
-  return validateWorkspaceFilename(filename);
+  return validateWorkspaceFilename(filename, environment);
 }

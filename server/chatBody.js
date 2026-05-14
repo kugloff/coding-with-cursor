@@ -11,12 +11,23 @@ export function normalizeChatMode(mode) {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {"js" | "python"}
+ */
+export function normalizeChatEnvironment(raw) {
+  if (typeof raw !== "string") return "js";
+  const t = raw.trim().toLowerCase();
+  return t === "python" ? "python" : "js";
+}
+
+/**
  * Validates optional `files` and `currentFile` from POST /chat JSON body.
  * @param {unknown} files
  * @param {unknown} currentFile
+ * @param {"js" | "python"} [environment]
  * @returns {{ ok: true, files?: Record<string, string>, currentFile?: string | null } | { ok: false, detail: string }}
  */
-export function parseChatContext(files, currentFile) {
+export function parseChatContext(files, currentFile, environment = "js") {
   let normalizedFiles;
   if (files === undefined || files === null) {
     normalizedFiles = undefined;
@@ -35,7 +46,7 @@ export function parseChatContext(files, currentFile) {
       if (key.length > 1024) {
         return { ok: false, detail: "A file path exceeds the maximum length (1024 characters)." };
       }
-      const keyErr = workspaceChatFileKeyErrorDetail(key);
+      const keyErr = workspaceChatFileKeyErrorDetail(key, environment);
       if (keyErr) {
         return { ok: false, detail: keyErr };
       }
@@ -60,7 +71,7 @@ export function parseChatContext(files, currentFile) {
   }
 
   if (normalizedCurrent != null) {
-    const curErr = workspaceChatFileKeyErrorDetail(normalizedCurrent);
+    const curErr = workspaceChatFileKeyErrorDetail(normalizedCurrent, environment);
     if (curErr) {
       return { ok: false, detail: curErr };
     }

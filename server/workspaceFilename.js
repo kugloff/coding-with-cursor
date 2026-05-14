@@ -35,3 +35,39 @@ export function normalizedJsWorkspaceRenameFromDraft(draft) {
   if (out.length > 1024) return null;
   return isValidJsWorkspaceFilename(out) ? out : null;
 }
+
+/**
+ * Virtual workspace: single-segment paths ending in `.py` only (case-insensitive).
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isValidPyWorkspaceFilename(name) {
+  if (typeof name !== "string") return false;
+  const t = name.trim();
+  if (!t || t.length > 1024) return false;
+  if (/[/\\]/.test(t)) return false;
+  return /\.py$/i.test(t);
+}
+
+/**
+ * @param {string} path
+ * @returns {string}
+ */
+export function workspacePyBasenameForRename(path) {
+  if (typeof path !== "string" || !path.trim()) return "";
+  return path.replace(/\.py$/i, "");
+}
+
+/**
+ * @param {string} draft
+ * @returns {string | null}
+ */
+export function normalizedPyWorkspaceRenameFromDraft(draft) {
+  const t = typeof draft === "string" ? draft.trim() : "";
+  if (!t || /[/\\]/.test(t)) return null;
+  const stem = t.includes(".") ? t.slice(0, t.lastIndexOf(".")).trim() : t;
+  if (!stem) return null;
+  const out = `${stem}.py`;
+  if (out.length > 1024) return null;
+  return isValidPyWorkspaceFilename(out) ? out : null;
+}

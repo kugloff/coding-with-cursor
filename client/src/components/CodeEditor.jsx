@@ -14,7 +14,14 @@ const DEFAULT_OPTIONS = {
   tabSize: 2,
 };
 
-export default function CodeEditor({ path, editorNonce = 0, value, onChange, language = "javascript" }) {
+export default function CodeEditor({
+  path,
+  editorNonce = 0,
+  environment = "js",
+  value,
+  onChange,
+  language = "javascript",
+}) {
   const options = {
     ...DEFAULT_OPTIONS,
     readOnly: !path,
@@ -22,7 +29,7 @@ export default function CodeEditor({ path, editorNonce = 0, value, onChange, lan
   return (
     <div className="code-editor">
       <Editor
-        key={`${path || "__none__"}:${editorNonce}`}
+        key={`${path || "__none__"}:${editorNonce}:${environment}`}
         height="100%"
         language={language}
         theme="vs-dark"

@@ -80,3 +80,29 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/components/ChatPanel.jsx`**: header mode toggle; every **`POST /chat`** body includes **`mode`**; applies **`onAiEditProposal`** only when **`data.mode === "agent"`** (ignores **`toolCall`** in chat).
 - **`client/src/App.css`**: **`.chat-panel__header`**, mode toggle / active button styles.
 - **`README.md`**: user guide + **`POST /chat`** spec updated for **`mode`**, Chat vs Agent behavior, and response shape.
+
+### 2026-05-14 — Dual-environment workspace (JS + Python isolation)
+
+- **`client/src/workspaceFilename.js`** / **`server/workspaceFilename.js`**: **`isValidPyWorkspaceFilename`**, **`workspacePyBasenameForRename`**, **`normalizedPyWorkspaceRenameFromDraft`** (mirror JS rules for **`.py`**).
+- **`client/src/workspaceFileValidation.js`**: all validators take optional **`environment`** (`"js"` \| `"python"`, default **`"js"`**) and enforce **`.js`** vs **`.py`** names.
+- **`client/src/workspaceStorage.js`**: **`DUAL_WORKSPACE_STORAGE_KEY`** (`llm:dualWorkspace:v1`); **`getDefaultDualWorkspace`**, **`loadPersistedDualWorkspace`** (migrates legacy **`llm:workspace:v1`** into the JS slice), **`persistDualWorkspace`**, **`clearPersistedWorkspace`** clears dual + legacy keys.
+- **`client/src/App.jsx`**: top-bar **JavaScript** / **Python** switch; state **`{ environment, js: { files, activePath }, python: { files, activePath } }`**; separate undo/redo stacks per environment; **Run** sends **`environment`**; chat receives **`environment`** prop; last-file delete guard; removed per-editor **Run runtime** toggle (environment drives Run + Monaco).
+- **`client/src/components/FileExplorer.jsx`**: **`environment`** prop; rename suffix and validation per env.
+- **`client/src/components/CodeEditor.jsx`**: **`environment`** in Monaco **`key`** for remount on switch.
+- **`client/src/components/ChatPanel.jsx`**: **`environment`** prop; **`POST /chat`** body includes **`environment`**; clears thread on env change; agent tool acceptance gated on **`data.environment`** matching client + extension check for **`.js`** / **`.py`**.
+- **`client/src/App.css`**: **`.workspace__env-toggle`** / **`.workspace__env-btn`**; **`.pane-header__pill--muted`**; removed **`.editor-runtime-*`** rules.
+- **`server/chatBody.js`**: **`normalizeChatEnvironment`**; **`parseChatContext(..., environment)`** uses **`workspaceChatFileKeyErrorDetail(key, environment)`**.
+- **`server/workspaceFileValidation.js`**: **`workspaceChatFileKeyErrorDetail(key, environment)`**.
+- **`server/assistantOutput.js`**: **`parseAssistantModelOutput(raw, environment)`** validates tool filenames per env.
+- **`server/services/geminiService.js`**: separate CHAT/AGENT rule blocks for JS vs Python; **`buildPromptWithFileContext(..., environment)`**; **`generateResponse({ ..., environment })`**; agent parsing passes **`environment`**.
+- **`server/index.js`**: **`POST /chat`** reads **`environment`**, echoes **`environment`**; **`POST /run`** prefers **`body.environment`**, falls back to **`runtime`**; variable renamed internally to **`environment`** for routing.
+- **`README.md`**: dual-workspace product spec, **`POST /chat`** / **`POST /run`** **`environment`** field, storage keys, migration.
+
+### 2026-05-14 — Multi-runtime **`POST /run`** (JavaScript + Python)
+
+- **`server/runPython.js`** (new): **`executePython(code)`** — **`spawnSync`** on **`PYTHON_BIN`** or OS default (**`python`** on Windows, **`python3`** elsewhere), args **`["-I", "-u", "-"]`**, script on stdin; stdout/stderr → **`{ output, error }`**; **`ENOENT`** / **`ETIMEDOUT`** handled; timeout from **`RUN_PYTHON_TIMEOUT_MS`** else **`RUN_TIMEOUT_MS`** from **`runCode.js`** (clamped **1–60000**).
+- **`server/index.js`**: **`normalizeRunRuntime`** — optional **`body.runtime`**; only **`"python"`** (trimmed, case-insensitive) selects Python; otherwise **`"js"`**; **`executeJavaScript`** unchanged for JS.
+- **`server/.env.example`**: documented **`RUN_PYTHON_TIMEOUT_MS`**, **`PYTHON_BIN`**.
+- **`client/src/App.jsx`**: **JS** / **Python** segmented control; **`runRuntime`** in **`sessionStorage`** (`llm:runRuntime:v1`); **`POST /run`** body **`{ code, runtime }`**; Monaco **`language`** follows runtime for the active tab; output copy and **`aria-label`** depend on runtime.
+- **`client/src/App.css`**: **`.editor-runtime-toggle`**, **`.editor-runtime-btn`**, active state.
+- **`README.md`**: Run UX, **`POST /run`** contract, env vars, security note for Python subprocess, troubleshooting, project layout, contributor touchpoints.
