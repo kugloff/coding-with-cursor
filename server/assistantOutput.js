@@ -1,6 +1,6 @@
 /**
  * Detects whether the model output is a plain-text reply or a JSON tool call
- * `{ "action": "edit_file", "filename", "content" }`.
+ * (`edit_file` or `create_file` with `filename` + `content`).
  */
 
 /**
@@ -17,19 +17,28 @@ function stripOuterCodeFence(s) {
 }
 
 /**
+ * @param {unknown} filename
+ * @returns {string | null} trimmed filename or null if invalid
+ */
+function normalizeToolFilename(filename) {
+  if (typeof filename !== "string") return null;
+  const t = filename.trim();
+  if (!t || t.length > 1024) return null;
+  if (/[/\\]/.test(t)) return null;
+  return t;
+}
+
+/**
  * @param {unknown} obj
+ * @param {"edit_file" | "create_file"} action
  * @returns {obj is { action: string, filename: string, content: string }}
  */
-function isEditFileTool(obj) {
-  return (
-    obj !== null &&
-    typeof obj === "object" &&
-    !Array.isArray(obj) &&
-    obj.action === "edit_file" &&
-    typeof obj.filename === "string" &&
-    obj.filename.trim().length > 0 &&
-    typeof obj.content === "string"
-  );
+function isFileTool(obj, action) {
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return false;
+  if (obj.action !== action) return false;
+  const name = normalizeToolFilename(obj.filename);
+  if (!name) return false;
+  return typeof obj.content === "string";
 }
 
 /**
@@ -50,12 +59,24 @@ export function parseAssistantModelOutput(raw) {
 
   try {
     const obj = JSON.parse(candidate);
-    if (isEditFileTool(obj)) {
+    if (isFileTool(obj, "create_file")) {
+      const name = normalizeToolFilename(obj.filename);
+      return {
+        response: "",
+        toolCall: {
+          action: "create_file",
+          filename: name,
+          content: obj.content,
+        },
+      };
+    }
+    if (isFileTool(obj, "edit_file")) {
+      const name = normalizeToolFilename(obj.filename);
       return {
         response: "",
         toolCall: {
           action: "edit_file",
-          filename: obj.filename.trim(),
+          filename: name,
           content: obj.content,
         },
       };

@@ -75,7 +75,16 @@ export default function ChatPanel({
         typeof tool.filename === "string" &&
         typeof tool.content === "string";
 
-      if (isEditTool) {
+      const isCreateTool =
+        tool &&
+        typeof tool === "object" &&
+        tool.action === "create_file" &&
+        typeof tool.filename === "string" &&
+        typeof tool.content === "string";
+
+      const isFileProposal = isEditTool || isCreateTool;
+
+      if (isFileProposal) {
         onAiEditProposal?.(tool);
       }
 
@@ -83,7 +92,11 @@ export default function ChatPanel({
 
       let assistantBody = textPart;
 
-      if (isEditTool) {
+      if (isCreateTool) {
+        const name = tool.filename.trim();
+        const prefix = `Proposed new file \`${name}\` — open the diff dialog (empty original if the file is new), then Accept or Reject.`;
+        assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
+      } else if (isEditTool) {
         const edited = tool.filename.trim();
         const prefix = `Proposed changes for \`${edited}\` — open the diff dialog to compare original vs new code, then choose Accept or Reject.`;
         assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
@@ -106,7 +119,7 @@ export default function ChatPanel({
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
             Cursor-style chat: ask about your code, or let the model return an{" "}
-            <code>edit_file</code> JSON action — a side-by-side diff opens first; nothing is saved until you accept. Each request sends the{" "}
+            <code>edit_file</code> / <code>create_file</code> JSON actions — a side-by-side diff opens first; nothing is saved until you accept. Each request sends the{" "}
             <strong>project file list</strong>, the <strong>active file name</strong>, and{" "}
             <strong>full file contents</strong> (within server limits). Set <code>GEMINI_API_KEY</code> in{" "}
             <code>server/.env</code>.

@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LayoutPanelLeft, MessageSquare, PanelsTopLeft, Redo2, Sparkles, Undo2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  LayoutPanelLeft,
+  MessageSquare,
+  PanelsTopLeft,
+  Play,
+  Redo2,
+  Sparkles,
+  Undo2,
+} from "lucide-react";
 import "./App.css";
 import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
@@ -60,8 +70,12 @@ export default function App() {
   const [editorNonce, setEditorNonce] = useState(0);
   /** Pending AI `edit_file` — side-by-side diff before apply. */
   const [aiEditPreview, setAiEditPreview] = useState(null);
-  /** `null` = hidden; otherwise toast shows which file the AI updated. */
+  /** `null` = hidden; otherwise full toast line (e.g. File updated by AI: path). */
   const [aiEditToastFile, setAiEditToastFile] = useState(null);
+  const [runOutput, setRunOutput] = useState("");
+  const [runError, setRunError] = useState("");
+  const [runPending, setRunPending] = useState(false);
+  const [runOutputMinimized, setRunOutputMinimized] = useState(false);
   const toastTimerRef = useRef(null);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
@@ -130,9 +144,9 @@ export default function App() {
     setEditorNonce((n) => n + 1);
   }, [bumpHistoryUi, resetManualEditGroup]);
 
-  const showAiEditToast = useCallback((filename) => {
+  const showAiEditToast = useCallback((message) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setAiEditToastFile(typeof filename === "string" && filename.trim() ? filename.trim() : "file");
+    setAiEditToastFile(typeof message === "string" && message.trim() ? message.trim() : "Saved.");
     toastTimerRef.current = window.setTimeout(() => {
       setAiEditToastFile(null);
       toastTimerRef.current = null;
@@ -144,6 +158,49 @@ export default function App() {
 
   const editorValue = activePath ? files[activePath] ?? "" : "";
   const editorLanguage = activePath ? languageFromFilename(activePath) : "javascript";
+  const canRunJavaScript = Boolean(activePath && editorLanguage === "javascript");
+
+  useEffect(() => {
+    setRunOutput("");
+    setRunError("");
+  }, [activePath]);
+
+  const handleRunCode = useCallback(async () => {
+    if (!activePath || editorLanguage !== "javascript") return;
+    const code = typeof files[activePath] === "string" ? files[activePath] : "";
+    setRunPending(true);
+    setRunOutputMinimized(false);
+    setRunError("");
+    setRunOutput("");
+    try {
+      const res = await fetch("/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      let data = {};
+      const raw = await res.text();
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          setRunError(raw.slice(0, 400) || `HTTP ${res.status}`);
+          return;
+        }
+      }
+      const out = typeof data.output === "string" ? data.output : "";
+      const err = typeof data.error === "string" ? data.error : "";
+      setRunOutput(out);
+      setRunError(err);
+      if (!res.ok && !err) {
+        setRunError(typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setRunError(e instanceof Error ? e.message : "Could not reach server");
+    } finally {
+      setRunPending(false);
+    }
+  }, [activePath, editorLanguage, files]);
 
   const handleEditorChange = useCallback(
     (value) => {
@@ -219,9 +276,10 @@ export default function App() {
   }, [pushUndoSnapshot, resetManualEditGroup]);
 
   const applyAiFileEdit = useCallback((tool) => {
-    if (!tool || tool.action !== "edit_file") return;
+    if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
     const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
     if (!filename || filename.length > 1024) return;
+    if (/[/\\]/.test(filename)) return;
     if (typeof tool.content !== "string") return;
     pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
     resetManualEditGroup();
@@ -231,23 +289,33 @@ export default function App() {
       activePath: filename,
     }));
     setEditorNonce((n) => n + 1);
-    showAiEditToast(filename);
+    const toastMsg =
+      tool.action === "create_file"
+        ? `File created by AI: ${filename}`
+        : `File updated by AI: ${filename}`;
+    showAiEditToast(toastMsg);
   }, [pushUndoSnapshot, resetManualEditGroup, showAiEditToast]);
 
   const handleAiEditProposal = useCallback((tool) => {
-    if (!tool || tool.action !== "edit_file") return;
+    if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
     const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
     if (!filename || filename.length > 1024) return;
+    if (/[/\\]/.test(filename)) return;
     if (typeof tool.content !== "string") return;
     const w = workspaceRef.current;
     const original = filename in w.files ? w.files[filename] ?? "" : "";
-    setAiEditPreview({ filename, original, modified: tool.content });
+    setAiEditPreview({
+      filename,
+      original,
+      modified: tool.content,
+      action: tool.action,
+    });
   }, []);
 
   const handleAcceptAiEditPreview = useCallback(() => {
     if (!aiEditPreview) return;
     applyAiFileEdit({
-      action: "edit_file",
+      action: aiEditPreview.action,
       filename: aiEditPreview.filename,
       content: aiEditPreview.modified,
     });
@@ -329,17 +397,70 @@ export default function App() {
               <PanelsTopLeft size={12} strokeWidth={2} aria-hidden />
               Editor
             </h2>
-            <span className="pane-header__pill" title={activePath || ""}>
-              {activePath || "—"}
-            </span>
+            <div className="pane-header__editor-meta">
+              <span className="pane-header__pill" title={activePath || ""}>
+                {activePath || "—"}
+              </span>
+              <button
+                type="button"
+                className="editor-run-btn"
+                onClick={handleRunCode}
+                disabled={!canRunJavaScript || runPending}
+                title={
+                  canRunJavaScript
+                    ? "Run current JavaScript on the server (sandboxed)"
+                    : "Open a .js / .jsx / .mjs / .cjs file to run"
+                }
+              >
+                <Play size={14} strokeWidth={2} aria-hidden />
+                {runPending ? "Running…" : "Run"}
+              </button>
+            </div>
           </div>
-          <CodeEditor
-            path={activePath}
-            editorNonce={editorNonce}
-            value={editorValue}
-            onChange={handleEditorChange}
-            language={editorLanguage}
-          />
+          <div className="editor-column">
+            <CodeEditor
+              path={activePath}
+              editorNonce={editorNonce}
+              value={editorValue}
+              onChange={handleEditorChange}
+              language={editorLanguage}
+            />
+            <div
+              className={`run-output${runOutputMinimized ? " run-output--minimized" : ""}`}
+              role="region"
+              aria-label="JavaScript run output"
+              aria-expanded={!runOutputMinimized}
+            >
+              <div className="run-output__head">
+                <span className="run-output__head-title">Output</span>
+                <button
+                  type="button"
+                  className="run-output__min-btn"
+                  onClick={() => setRunOutputMinimized((m) => !m)}
+                  aria-expanded={!runOutputMinimized}
+                  title={runOutputMinimized ? "Expand output panel" : "Minimize output panel"}
+                >
+                  {runOutputMinimized ? (
+                    <ChevronUp size={14} strokeWidth={2} aria-hidden />
+                  ) : (
+                    <ChevronDown size={14} strokeWidth={2} aria-hidden />
+                  )}
+                </button>
+              </div>
+              {!runOutputMinimized ? (
+                <div className="run-output__body-wrap">
+                  {runPending && <p className="run-output__placeholder">Running…</p>}
+                  {!runPending && !runOutput && !runError && (
+                    <p className="run-output__placeholder">Run sends the active file to the server and shows stdout here.</p>
+                  )}
+                  {runError ? (
+                    <pre className="run-output__pre run-output__pre--error">{runError}</pre>
+                  ) : null}
+                  {runOutput ? <pre className="run-output__pre run-output__pre--out">{runOutput}</pre> : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </section>
 
         <aside className="workspace__pane workspace__pane--right">
@@ -364,6 +485,7 @@ export default function App() {
           original={aiEditPreview.original}
           modified={aiEditPreview.modified}
           language={aiPreviewLanguage}
+          toolAction={aiEditPreview.action}
           onAccept={handleAcceptAiEditPreview}
           onReject={handleRejectAiEditPreview}
         />
@@ -371,7 +493,7 @@ export default function App() {
 
       {aiEditToastFile && (
         <div className="ai-toast" role="status" aria-live="polite">
-          File updated by AI: {aiEditToastFile}
+          {aiEditToastFile}
         </div>
       )}
     </div>

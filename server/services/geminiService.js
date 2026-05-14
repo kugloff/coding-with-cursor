@@ -5,10 +5,13 @@ const MODEL_NAME = "gemini-2.5-flash";
 
 const RESPONSE_FORMAT_RULES = `How to format your reply:
 - For explanations, questions, or chat: respond with plain text only (do not wrap in JSON).
-- To replace an entire file in the user's workspace, respond with ONLY a single JSON object and nothing else (no markdown fences, no prose). Shape:
+- To replace an entire existing file, respond with ONLY a single JSON object and nothing else (no markdown fences, no prose). Shape:
   {"action":"edit_file","filename":"<path>","content":"<full new file text>"}
-  The "filename" field must be an exact path from the project file list above (or the active file path). Prefer the active file when the user did not ask to edit a different path.
-  The "content" value must be a valid JSON string (escape quotes, newlines, etc.).`;
+  Use "edit_file" when the path already exists in the project file list (or you are overwriting the active file). The "filename" must match an exact path from the list (or the active file path).
+- To add a new file that does not exist yet, use ONLY this shape:
+  {"action":"create_file","filename":"<path>","content":"<full new file text>"}
+  Use a simple filename (no slashes or backslashes). Do not use "create_file" for paths that already exist — use "edit_file" instead.
+- The "content" value must be a valid JSON string (escape quotes, newlines, etc.).`;
 
 /** Total characters of file bodies included in the prompt (soft cap). */
 const MAX_CONTEXT_CHARS = 200_000;
@@ -132,7 +135,7 @@ function buildPromptWithFileContext(message, files, currentFile) {
  * Calls Google Gemini with optional workspace file context.
  * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null }} input
  *   `files` maps path → content (empty strings allowed). `currentFile` selects the active tab; its body is placed first in the prompt when present in `files`.
- * @returns {Promise<{ response: string, toolCall: null | { action: string, filename: string, content: string } }>}
+ * @returns {Promise<{ response: string, toolCall: null | { action: "edit_file" | "create_file", filename: string, content: string } }>}
  */
 export async function generateResponse({ message, files, currentFile }) {
   const apiKey = process.env.GEMINI_API_KEY;

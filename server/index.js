@@ -7,6 +7,7 @@ import {
   GeminiApiError,
 } from "./services/geminiService.js";
 import { parseChatContext } from "./chatBody.js";
+import { executeJavaScript, MAX_RUN_CODE_CHARS } from "./runCode.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -83,6 +84,39 @@ app.post("/chat", async (req, res) => {
     return res.status(500).json({
       error: "Internal server error",
       detail: "An unexpected error occurred while processing the chat request.",
+    });
+  }
+});
+
+app.post("/run", (req, res) => {
+  const body = req.body ?? {};
+  const { code } = body;
+
+  if (typeof code !== "string") {
+    return res.status(400).json({
+      output: "",
+      error: 'Invalid request body: expected JSON with a string "code" field.',
+    });
+  }
+
+  if (code.length > MAX_RUN_CODE_CHARS) {
+    return res.status(400).json({
+      output: "",
+      error: `Code exceeds maximum length (${MAX_RUN_CODE_CHARS} characters).`,
+    });
+  }
+
+  try {
+    const { output, error } = executeJavaScript(code);
+    return res.json({
+      output: typeof output === "string" ? output : String(output ?? ""),
+      error: typeof error === "string" ? error : String(error ?? ""),
+    });
+  } catch (err) {
+    console.error("POST /run unexpected error:", err);
+    return res.status(500).json({
+      output: "",
+      error: "Internal error while executing code.",
     });
   }
 });
