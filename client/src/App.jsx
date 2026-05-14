@@ -4,6 +4,7 @@ import "./App.css";
 import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
+import AiEditPreviewModal from "./components/AiEditPreviewModal.jsx";
 
 const DEFAULT_FILES = {
   "main.js": `// Welcome — edit freely
@@ -57,6 +58,8 @@ export default function App() {
     activePath: "main.js",
   });
   const [editorNonce, setEditorNonce] = useState(0);
+  /** Pending AI `edit_file` — side-by-side diff before apply. */
+  const [aiEditPreview, setAiEditPreview] = useState(null);
   /** `null` = hidden; otherwise toast shows which file the AI updated. */
   const [aiEditToastFile, setAiEditToastFile] = useState(null);
   const toastTimerRef = useRef(null);
@@ -215,7 +218,7 @@ export default function App() {
     return true;
   }, [pushUndoSnapshot, resetManualEditGroup]);
 
-  const handleChatToolCall = useCallback((tool) => {
+  const applyAiFileEdit = useCallback((tool) => {
     if (!tool || tool.action !== "edit_file") return;
     const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
     if (!filename || filename.length > 1024) return;
@@ -230,6 +233,35 @@ export default function App() {
     setEditorNonce((n) => n + 1);
     showAiEditToast(filename);
   }, [pushUndoSnapshot, resetManualEditGroup, showAiEditToast]);
+
+  const handleAiEditProposal = useCallback((tool) => {
+    if (!tool || tool.action !== "edit_file") return;
+    const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
+    if (!filename || filename.length > 1024) return;
+    if (typeof tool.content !== "string") return;
+    const w = workspaceRef.current;
+    const original = filename in w.files ? w.files[filename] ?? "" : "";
+    setAiEditPreview({ filename, original, modified: tool.content });
+  }, []);
+
+  const handleAcceptAiEditPreview = useCallback(() => {
+    if (!aiEditPreview) return;
+    applyAiFileEdit({
+      action: "edit_file",
+      filename: aiEditPreview.filename,
+      content: aiEditPreview.modified,
+    });
+    setAiEditPreview(null);
+  }, [aiEditPreview, applyAiFileEdit]);
+
+  const handleRejectAiEditPreview = useCallback(() => {
+    setAiEditPreview(null);
+  }, []);
+
+  const aiPreviewLanguage = useMemo(
+    () => (aiEditPreview ? languageFromFilename(aiEditPreview.filename) : "plaintext"),
+    [aiEditPreview],
+  );
 
   const canUndo = useMemo(() => undoStackRef.current.length > 0, [historyTick]);
   const canRedo = useMemo(() => redoStackRef.current.length > 0, [historyTick]);
@@ -317,9 +349,25 @@ export default function App() {
               AI Chat
             </h2>
           </div>
-          <ChatPanel files={files} currentFile={activePath} onToolCall={handleChatToolCall} />
+          <ChatPanel
+            files={files}
+            currentFile={activePath}
+            onAiEditProposal={handleAiEditProposal}
+            diffPreviewOpen={!!aiEditPreview}
+          />
         </aside>
       </div>
+
+      {aiEditPreview && (
+        <AiEditPreviewModal
+          filename={aiEditPreview.filename}
+          original={aiEditPreview.original}
+          modified={aiEditPreview.modified}
+          language={aiPreviewLanguage}
+          onAccept={handleAcceptAiEditPreview}
+          onReject={handleRejectAiEditPreview}
+        />
+      )}
 
       {aiEditToastFile && (
         <div className="ai-toast" role="status" aria-live="polite">

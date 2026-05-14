@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowUp, Sparkles, User } from "lucide-react";
 
-export default function ChatPanel({ files = {}, currentFile = null, onToolCall }) {
+export default function ChatPanel({
+  files = {},
+  currentFile = null,
+  onAiEditProposal,
+  diffPreviewOpen = false,
+}) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
@@ -23,7 +28,7 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
   async function handleSend(e) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || pending) return;
+    if (!text || pending || diffPreviewOpen) return;
 
     setInput("");
     appendMessage("user", text);
@@ -71,7 +76,7 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
         typeof tool.content === "string";
 
       if (isEditTool) {
-        onToolCall?.(tool);
+        onAiEditProposal?.(tool);
       }
 
       const textPart = data.response.trim();
@@ -80,8 +85,8 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
 
       if (isEditTool) {
         const edited = tool.filename.trim();
-        const prefix = `Edited workspace file: \`${edited}\``;
-        assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}\n\nFull file content was replaced via edit_file.`;
+        const prefix = `Proposed changes for \`${edited}\` — open the diff dialog to compare original vs new code, then choose Accept or Reject.`;
+        assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
       } else if (!assistantBody) {
         throw new Error("Invalid response from server (empty reply)");
       }
@@ -101,9 +106,10 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
             Cursor-style chat: ask about your code, or let the model return an{" "}
-            <code>edit_file</code> JSON action. Each request sends the <strong>project file list</strong>, the{" "}
-            <strong>active file name</strong>, and <strong>full file contents</strong> (within server limits). Set{" "}
-            <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
+            <code>edit_file</code> JSON action — a side-by-side diff opens first; nothing is saved until you accept. Each request sends the{" "}
+            <strong>project file list</strong>, the <strong>active file name</strong>, and{" "}
+            <strong>full file contents</strong> (within server limits). Set <code>GEMINI_API_KEY</code> in{" "}
+            <code>server/.env</code>.
           </p>
         )}
         {messages.map((msg) => (
@@ -164,12 +170,12 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
                 handleSend(e);
               }
             }}
-            disabled={pending}
+            disabled={pending || diffPreviewOpen}
           />
           <button
             type="submit"
             className="chat-panel__send"
-            disabled={pending || !input.trim()}
+            disabled={pending || diffPreviewOpen || !input.trim()}
             aria-label="Send message"
           >
             <ArrowUp size={17} strokeWidth={2.5} />

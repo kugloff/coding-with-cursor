@@ -7,7 +7,7 @@ This repo is a small **JavaScript** (no TypeScript) fullstack setup:
 | API    | `server/` | Node.js, Express, ES modules  | http://localhost:3001    |
 | UI     | `client/` | React 19, Vite 6, Monaco, **lucide-react** icons | http://localhost:5173    |
 
-**Frontend UI:** **Cursor-inspired** dark workspace — layered backgrounds, **lucide-react** icons, smooth **CSS motion** (messages, file list, typing dots, toasts), **Explorer** with per-type file icons, **Monaco** center, **AI Chat** (avatar rows + composer). **`edit_file`** updates files, Monaco **`editorNonce`**, and a toast that names the file (**File updated by AI:** plus the path — see [Assistant reply format](#assistant-reply-format-tool-calls)).
+**Frontend UI:** **Cursor-inspired** dark workspace — layered backgrounds, **lucide-react** icons, smooth **CSS motion** (messages, file list, typing dots, toasts), **Explorer** (per-type file icons, right-click file menu, active row highlight), **Monaco** center, **AI Chat** (avatar rows + composer). The browser tab uses an **SVG favicon** (`public/favicon.svg`). **`edit_file`** opens a **side-by-side diff preview** before saving; after accept, Monaco **`editorNonce`** updates and a toast names the file (**File updated by AI:** plus the path — see [Assistant reply format](#assistant-reply-format-tool-calls)).
 
 **Google Gemini (server):** chat is implemented in `server/services/geminiService.js` using `@google/generative-ai` and model **`gemini-2.5-flash`** (see `MODEL_NAME` in that file). The API key is read from **`GEMINI_API_KEY`** (never commit the real key).
 
@@ -23,9 +23,9 @@ When you ask for changes, it helps to specify:
 4. **Env** — Node version if not default LTS; any secrets via `.env` (never commit real secrets).
 5. **Ports** — if you change `3001` / `5173`, say so (CORS + Vite proxy must stay aligned).
 6. **Gemini** — for chat or model changes: confirm `GEMINI_API_KEY` in the server environment and desired model name (see `MODEL_NAME` in `server/services/geminiService.js`).
-7. **Monaco / layout / UI** — `CodeEditor.jsx`, **`App.css`** / **`index.css`** tokens, **`lucide-react`** icons, `vite.config.js` (Monaco plugin).
+7. **Monaco / layout / UI** — `CodeEditor.jsx`, **`App.css`** / **`index.css`** tokens, **`lucide-react`** icons, **`index.html`** / **`public/favicon.svg`**, `vite.config.js` (Monaco plugin).
 8. **Virtual files** — state lives in `App.jsx` (`workspace.files` map); no persistence unless you add it. **Workspace undo / redo** (top bar) keep in-memory stacks of snapshots (see [In-memory workspace files](#in-memory-workspace-files)).
-9. **Assistant tool JSON** — if changing the `edit_file` contract, update **`server/assistantOutput.js`**, **`server/services/geminiService.js`** (prompt + **`RESPONSE_FORMAT_RULES`**), **`ChatPanel`**, **`App.jsx`** (`handleChatToolCall`, toast, **`editorNonce`**), **`CodeEditor`**, and this README.
+9. **Assistant tool JSON** — if changing the `edit_file` contract, update **`server/assistantOutput.js`**, **`server/services/geminiService.js`** (prompt + **`RESPONSE_FORMAT_RULES`**), **`ChatPanel`**, **`App.jsx`** (`applyAiFileEdit`, **`AiEditPreviewModal`**, toast, **`editorNonce`**), **`CodeEditor`**, and this README.
 
 ---
 
@@ -73,7 +73,7 @@ This runs **Express** and **Vite** together via `concurrently`.
 
 **Explorer / editor:** use **New file** to add `untitled-N.js` entries. Click a file to open it in Monaco; edits update **`workspace.files[path]`** in React state immediately (no disk, no DB). **Undo** / **Redo** in the top bar walk **workspace snapshots** (all files + **`activePath`**): **Undo** restores the state before your last captured action (or before the current **typing burst** on the open file — see table below). **Redo** reapplies a state you had undone until you make a new edit (which clears the redo branch). **Delete** removes a file from the map; if it was open, **`activePath`** becomes another file or **`null`** (empty read-only editor). **Rename** keeps content under a new key and updates **`activePath`** when the renamed file was focused. Names must be non-empty, at most **1024** characters, and cannot contain **`/`** or **`\`**; duplicates are rejected. Refreshing the page resets to the default **`main.js`** starter and clears both stacks.
 
-**Chat in the UI:** **`POST /chat`** sends **`files`**, **`currentFile`** (active editor path), and **`message`**. The server builds a Gemini prompt with a **project file list**, the **active filename**, and **current file body first** (then other files), within soft caps in **`geminiService.js`**. On **`edit_file`**, **`App.jsx`** updates **`files`**, focuses the file, bumps **`editorNonce`**, and shows a toast (**File updated by AI:** plus the edited path, ~3.2s). **`ChatPanel`** also prefixes the assistant bubble with which path was edited. Set **`GEMINI_API_KEY`** in **`server/.env`**.
+**Chat in the UI:** **`POST /chat`** sends **`files`**, **`currentFile`**, and **`message`**. On **`edit_file`**, a **Monaco diff modal** shows **original vs proposed** text; **Accept** runs the same apply path as before (undo snapshot, workspace update, **`editorNonce`**, toast). **Reject** or **Escape** closes the dialog without changes. While the diff is open, the composer is disabled. Set **`GEMINI_API_KEY`** in **`server/.env`**.
 
 ### Run one side only
 
@@ -110,10 +110,12 @@ Serving the built SPA from Express is **not** wired yet; say if you want `expres
 
 | Piece | Role |
 |--------|------|
-| `src/App.jsx` | Workspace + **topbar** (**Undo** / **Redo**); **`handleChatToolCall`**, **`editorNonce`**, **`.ai-toast`** (names the file the AI updated) |
-| `src/components/FileExplorer.jsx` | File list + **New file**; per-row **Rename** (inline name field) and **Delete** (confirm in `App`); **`lucide-react`** icons by extension; row **hover / active** transitions |
+| `index.html`, `public/favicon.svg` | **Tab favicon** — vector SVG (dark editor window + code brackets); `<link rel="icon" type="image/svg+xml" href="/favicon.svg">`; Vite serves `public/` at `/` |
+| `src/App.jsx` | Workspace + **topbar** (**Undo** / **Redo**); **`applyAiFileEdit`** after diff **Accept**; **`AiEditPreviewModal`** for AI changes; **`editorNonce`**, **`.ai-toast`** |
+| `src/components/FileExplorer.jsx` | File list + **New file**; **lucide** icons by type (code, JSON, text, images, shell, `.env`, YAML, …); row **hover / active** (accent rail); **right‑click** context menu (**Rename** / **Delete**) portaled to `document.body`; inline rename + row icon buttons |
 | `src/components/CodeEditor.jsx` | **Monaco** — `key` uses **`path`** + **`editorNonce`**; `language` from extension (`.js`, `.json`, `.css`, …) |
-| `src/components/ChatPanel.jsx` | **Cursor-style** thread; **`POST /chat`** + **`onToolCall`**; assistant reply names the path when **`edit_file`** runs |
+| `src/components/AiEditPreviewModal.jsx` | **Monaco `DiffEditor`** (read-only, side-by-side) + **Accept** / **Reject**; **Escape** rejects; backdrop dismiss |
+| `src/components/ChatPanel.jsx` | **Cursor-style** thread; **`POST /chat`** + **`onAiEditProposal`**; explains diff step when **`edit_file`** returns |
 
 ### Chat UI and backend
 
@@ -130,7 +132,7 @@ sequenceDiagram
   Gemini-->>API: text
   API-->>Vite: 200 { response, toolCall }
   Vite-->>UI: JSON { response, toolCall }
-  UI->>UI: merge files + activePath + editorNonce + toast
+  UI->>UI: diff modal → accept/reject → merge files + activePath + editorNonce + toast
 ```
 
 | Step | Detail |
@@ -138,11 +140,11 @@ sequenceDiagram
 | 1 | User submits text; UI immediately shows a **user** row (avatar + bubble). |
 | 2 | `POST /chat` with body **`{ "message": string, "files"?: object, "currentFile"?: string \| null }`**. The UI always sends **`files`** (full workspace map) and **`currentFile`** (active editor tab, or `null`). |
 | 3 | On **200**, body has **`response`** (string, may be `""`) and **`toolCall`** (`null` or object). |
-| 4 | If **`toolCall.action === "edit_file"`**, **`onToolCall`** updates **`files[filename]`**, sets **`activePath`**, bumps **`editorNonce`** (Monaco **`key`**), shows toast **File updated by AI:** plus the path. The chat thread prefixes the assistant message with the edited path. |
+| 4 | If **`toolCall.action === "edit_file"`**, **`onAiEditProposal`** opens **`AiEditPreviewModal`** (original vs new). **Accept** applies **`files[filename]`**, sets **`activePath`**, bumps **`editorNonce`**, shows **File updated by AI:** toast. **Reject** discards. The chat bubble explains the diff step. |
 | 5 | On error (non-OK or network), UI shows **Error** with `detail` / `error` from JSON when present. |
 | 6 | In dev, **`client/vite.config.js`** proxies **`/chat`** → `http://localhost:3001/chat` (same path). |
 
-**Styles:** `src/App.css` (workspace, **Cursor-style** chat thread + composer, explorer, motion keyframes, **`.ai-toast`**), `src/index.css` (dark tokens, **body radial glow**, **`prefers-reduced-motion`** overrides).
+**Styles:** `src/App.css` (workspace, **Cursor-style** chat thread + composer, explorer + **context menu**, **AI diff preview overlay**, motion keyframes, **`.ai-toast`**), `src/index.css` (dark tokens, **body radial glow**, **`prefers-reduced-motion`** overrides).
 
 **Dependencies (notable):**
 
@@ -166,10 +168,10 @@ sequenceDiagram
 | Rename | **`handleRenameFile(old, next)`** (via **`workspaceRef`** for latest keys): copies content to **`next`**, removes **`old`**; if **`activePath === old`**, sets **`activePath`** to **`next`**. Validation: trimmed non-empty name, max length **1024**, no **`/`** or **`\`**, no duplicate keys; same name is a no-op success. |
 | Editor | Monaco **`value`** is **`files[activePath]`** (or empty when **`activePath`** is **`null`**); **`onChange`** writes back into **`files[activePath]`** when a file is open (live “save” in RAM). |
 | Language | **`languageFromFilename()`** in `App.jsx` maps extension → Monaco language (unknown → `plaintext`). |
-| Remount | **`CodeEditor`** uses **`key={\`${path}:${editorNonce}\`}`**: changing tabs changes **`path`**; after an AI **`edit_file`**, **delete**, **rename**, **workspace undo/redo**, or similar, **`App`** may increment **`editorNonce`** so Monaco shows the new **`content`** or empty state. |
-| Undo / redo | Top-bar **Undo** pops the last snapshot from an undo stack (max **40** entries); the **current** workspace is pushed onto a **redo** stack first. **Redo** pops from redo (after pushing current onto undo). A snapshot is **`{ files, activePath }`** (shallow-cloned file map). Snapshots are pushed onto **undo** **before**: each **`edit_file`** from chat, **delete**, **rename**, **New file**, and the **first** Monaco content change on the current file after switching tabs or any of those operations — and **redo is cleared** whenever a new snapshot is captured (standard branch behavior). **Manual typing** on one file without switching only creates **one** undo entry for the whole burst (first keystroke captures pre-edit state). **Reload** clears both stacks. |
+| Remount | **`CodeEditor`** uses **`key={\`${path}:${editorNonce}\`}`**: changing tabs changes **`path`**; after an **accepted** AI **`edit_file`**, **delete**, **rename**, **workspace undo/redo**, or similar, **`App`** may increment **`editorNonce`** so Monaco shows the new **`content`** or empty state. |
+| Undo / redo | Top-bar **Undo** pops the last snapshot from an undo stack (max **40** entries); the **current** workspace is pushed onto a **redo** stack first. **Redo** pops from redo (after pushing current onto undo). A snapshot is **`{ files, activePath }`** (shallow-cloned file map). Snapshots are pushed onto **undo** **before**: each **accepted** AI **`edit_file`**, **delete**, **rename**, **New file**, and the **first** Monaco content change on the current file after switching tabs or any of those operations — and **redo is cleared** whenever a new snapshot is captured (standard branch behavior). **Manual typing** on one file without switching only creates **one** undo entry for the whole burst (first keystroke captures pre-edit state). **Reload** clears both stacks. |
 
-The **Chat** panel passes **`files`** (every path → content string, including empty files) and **`currentFile`** on each **`POST /chat`**. **`geminiService.js`** turns that into a prompt with a **sorted project file list**, the **active file name**, **current file content first**, then other files (subject to size limits). **`edit_file`** is applied in **`App.jsx`** with the toast + nonce behavior above.
+The **Chat** panel passes **`files`** (every path → content string, including empty files) and **`currentFile`** on each **`POST /chat`**. **`geminiService.js`** turns that into a prompt with a **sorted project file list**, the **active file name**, **current file content first**, then other files (subject to size limits). When the model returns **`edit_file`**, **`App.jsx`** opens **`AiEditPreviewModal`**; the workspace updates only after **Accept** (toast + **`editorNonce`** as before).
 
 Data is **not** sent to the server except through **chat** (and other API calls you add); **reload** restores only **`DEFAULT_FILES`** (`main.js`). Monaco also has its **own** buffer undo/redo (**Ctrl+Z** / **Ctrl+Y** inside the editor); that is separate from **workspace** undo/redo in the top bar.
 
@@ -245,7 +247,7 @@ The server parses this with **`parseAssistantModelOutput`** in **`server/assista
 | `response` | string | Human-readable reply; may be `""` when the model returned only a tool JSON payload. |
 | `toolCall` | `null` \| object | `null` for normal chat. Otherwise `{ "action": "edit_file", "filename": string, "content": string }` after server-side validation of the parsed JSON. |
 
-**Client behavior:** `ChatPanel` calls **`onToolCall(tool)`** for **`edit_file`** and prefixes the assistant reply with the edited path (`Edited workspace file:` …). **`App.jsx`** **`handleChatToolCall`** updates **`workspace`**, increments **`editorNonce`**, and shows **`ai-toast`** with **File updated by AI:** and the path (`role="status"`, auto-dismiss ~3.2s). **`CodeEditor`** receives **`editorNonce`** as part of the Monaco **`key`** so the editor reflects AI-written content immediately.
+**Client behavior:** `ChatPanel` calls **`onAiEditProposal(tool)`** for **`edit_file`** (does not write files yet) and tells the user to review the diff dialog. **`App.jsx`** shows **`AiEditPreviewModal`** with Monaco **`DiffEditor`**. **Accept** runs **`applyAiFileEdit`**: updates **`workspace`**, increments **`editorNonce`**, **`ai-toast`** with **File updated by AI:** and path. **Reject** / backdrop / **Escape** closes the modal with no file changes. **`CodeEditor`** uses **`editorNonce`** in the Monaco **`key`** after an accepted edit.
 
 **Error responses (JSON):** failures return at least `error` and usually `detail` (human-readable). Status codes include:
 
@@ -280,15 +282,18 @@ The Express app uses **`express.json({ limit: "4mb" })`**, **CORS** (`CLIENT_ORI
     ├── package.json
     ├── vite.config.js
     ├── index.html
+    ├── public/
+    │   └── favicon.svg   # tab icon (SVG); linked from index.html
     └── src/
         ├── main.jsx
         ├── App.jsx
         ├── App.css
         ├── index.css
         └── components/
-            ├── FileExplorer.jsx
+            ├── AiEditPreviewModal.jsx
+            ├── ChatPanel.jsx
             ├── CodeEditor.jsx
-            └── ChatPanel.jsx
+            └── FileExplorer.jsx
 ```
 
 ---
@@ -301,7 +306,7 @@ The Express app uses **`express.json({ limit: "4mb" })`**, **CORS** (`CLIENT_ORI
 - **Virtual workspace files:** in-memory map + `activePath` in **`client/src/App.jsx`**; not persisted (refresh resets to `main.js` only). **Workspace undo/redo** (top bar) holds up to **40** shallow snapshots per stack of **`{ files, activePath }`** in ref-backed undo and redo stacks.
 - **CORS:** Restricted to `CLIENT_ORIGIN` in dev; extend or use a list if you add more origins.
 - **Proxy:** During `vite` dev, `/api` and `/chat` are proxied to the Express port (`client/vite.config.js`).
-- **Chat + code context:** `POST /chat` with **`files`** / **`currentFile`**; **`geminiService.js`** builds list + active-first prompt; **`assistantOutput.js`** parses **`edit_file`**; **`App.jsx`** applies tools, **`editorNonce`**, **`.ai-toast`** (includes path); **`ChatPanel`** shows the edited path in the thread.
+- **Chat + code context:** `POST /chat` with **`files`** / **`currentFile`**; **`geminiService.js`** builds list + active-first prompt; **`assistantOutput.js`** parses **`edit_file`**; **`App.jsx`** + **`AiEditPreviewModal`** (accept/reject diff) then **`applyAiFileEdit`**, **`editorNonce`**, **`.ai-toast`**; **`ChatPanel`** uses **`onAiEditProposal`**.
 - **UI / motion:** **`lucide-react`** + **Cursor-style** chat (`App.css` / `index.css`); **`prefers-reduced-motion`** shortens animations.
 - **Monaco:** `vite.config.js` registers `vite-plugin-monaco-editor` **after** `@vitejs/plugin-react` (workers → `dist/monacoeditorwork/`).
 
