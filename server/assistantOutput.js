@@ -3,6 +3,8 @@
  * (`edit_file` or `create_file` with `filename` + `content`).
  */
 
+import { isValidJsWorkspaceFilename } from "./workspaceFilename.js";
+
 /**
  * Strip a single leading/trailing markdown ``` fence if present.
  * @param {string} s
@@ -61,6 +63,15 @@ export function parseAssistantModelOutput(raw) {
     const obj = JSON.parse(candidate);
     if (isFileTool(obj, "create_file")) {
       const name = normalizeToolFilename(obj.filename);
+      if (!name) {
+        return { response: trimmed, toolCall: null };
+      }
+      if (!isValidJsWorkspaceFilename(name)) {
+        return {
+          response: `Workspace only allows JavaScript files named with a ".js" extension (e.g. helpers.js). Ignored create_file for "${name}". Reply in plain text or retry with a valid .js filename and JavaScript-only content.`,
+          toolCall: null,
+        };
+      }
       return {
         response: "",
         toolCall: {
@@ -72,6 +83,15 @@ export function parseAssistantModelOutput(raw) {
     }
     if (isFileTool(obj, "edit_file")) {
       const name = normalizeToolFilename(obj.filename);
+      if (!name) {
+        return { response: trimmed, toolCall: null };
+      }
+      if (!isValidJsWorkspaceFilename(name)) {
+        return {
+          response: `Workspace only allows JavaScript files named with a ".js" extension. Ignored edit_file for "${name}". Use an existing path from the project list that ends in .js, or explain changes in plain text.`,
+          toolCall: null,
+        };
+      }
       return {
         response: "",
         toolCall: {

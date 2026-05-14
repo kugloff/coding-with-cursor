@@ -5,11 +5,24 @@ const { VM } = require("vm2");
 
 /** Max source length sent to POST /run (bytes-ish, string length). */
 export const MAX_RUN_CODE_CHARS = 500_000;
-/** Wall-clock timeout for each run (vm2). */
-export const RUN_TIMEOUT_MS = 10_000;
+/**
+ * Wall-clock timeout for each vm2 `VM.run` (sync script only; see `allowAsync: false`).
+ * Override with env `RUN_VM_TIMEOUT_MS` (integer ms, clamped 1–60000); default **1000**.
+ */
+function resolveRunTimeoutMs() {
+  const raw = process.env.RUN_VM_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return 1000;
+  const n = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(n) || n < 1) return 1000;
+  return Math.min(n, 60_000);
+}
+
+export const RUN_TIMEOUT_MS = resolveRunTimeoutMs();
 
 /**
- * Run user JavaScript inside vm2 with a stub console and strict mode.
+ * Run user JavaScript inside vm2 `VM`: isolated context, no Node `require` / `process` / `fs`
+ * in the sandbox (only a stub `console` is injected). `eval` / `Function` code generation and
+ * WebAssembly are disabled; async syntax is rejected so the timeout applies to synchronous work.
  * @param {string} code
  * @returns {{ output: string, error: string }}
  */
@@ -44,6 +57,10 @@ export function executeJavaScript(code) {
     const vm = new VM({
       timeout: RUN_TIMEOUT_MS,
       sandbox: { console: sandboxConsole },
+      eval: false,
+      wasm: false,
+      allowAsync: false,
+      bufferAllocLimit: 1024 * 1024,
     });
     const wrapped = `"use strict";\n${code}`;
     const result = vm.run(wrapped);

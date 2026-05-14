@@ -15,6 +15,15 @@ import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
 import AiEditPreviewModal from "./components/AiEditPreviewModal.jsx";
+import {
+  isValidJsWorkspaceFilename,
+} from "./workspaceFilename.js";
+import {
+  validateWorkspaceAiFileTarget,
+  validateWorkspaceCreate,
+  validateWorkspaceExistingPath,
+  validateWorkspaceRenameTarget,
+} from "./workspaceFileValidation.js";
 
 const DEFAULT_FILES = {
   "main.js": `// Welcome — edit freely
@@ -26,23 +35,9 @@ console.log(greet("Monaco"));
 `,
 };
 
-function languageFromFilename(filename) {
-  const i = filename.lastIndexOf(".");
-  if (i === -1) return "plaintext";
-  const ext = filename.slice(i).toLowerCase();
-  const map = {
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".json": "json",
-    ".css": "css",
-    ".html": "html",
-    ".md": "markdown",
-  };
-  return map[ext] ?? "plaintext";
+function editorLanguageForWorkspacePath(filename) {
+  if (!filename) return "javascript";
+  return isValidJsWorkspaceFilename(filename) ? "javascript" : "plaintext";
 }
 
 function nextUntitledName(files) {
@@ -52,7 +47,9 @@ function nextUntitledName(files) {
     n += 1;
     name = `untitled-${n}.js`;
   }
-  return name;
+  const v = validateWorkspaceCreate(name, files);
+  if (v.ok) return name;
+  return `untitled-${Date.now()}.js`;
 }
 
 const MAX_UNDO = 40;
@@ -157,8 +154,8 @@ export default function App() {
   const sortedPaths = useMemo(() => Object.keys(files).sort((a, b) => a.localeCompare(b)), [files]);
 
   const editorValue = activePath ? files[activePath] ?? "" : "";
-  const editorLanguage = activePath ? languageFromFilename(activePath) : "javascript";
-  const canRunJavaScript = Boolean(activePath && editorLanguage === "javascript");
+  const editorLanguage = editorLanguageForWorkspacePath(activePath);
+  const canRunJavaScript = Boolean(activePath && isValidJsWorkspaceFilename(activePath));
 
   useEffect(() => {
     setRunOutput("");
@@ -166,7 +163,7 @@ export default function App() {
   }, [activePath]);
 
   const handleRunCode = useCallback(async () => {
-    if (!activePath || editorLanguage !== "javascript") return;
+    if (!activePath || !isValidJsWorkspaceFilename(activePath)) return;
     const code = typeof files[activePath] === "string" ? files[activePath] : "";
     setRunPending(true);
     setRunOutputMinimized(false);
@@ -200,7 +197,7 @@ export default function App() {
     } finally {
       setRunPending(false);
     }
-  }, [activePath, editorLanguage, files]);
+  }, [activePath, files]);
 
   const handleEditorChange = useCallback(
     (value) => {
@@ -242,15 +239,18 @@ export default function App() {
   }, [pushUndoSnapshot, resetManualEditGroup]);
 
   const handleDeleteFile = useCallback((path) => {
-    if (!window.confirm(`Delete "${path}"?`)) return;
+    const w = workspaceRef.current;
+    const del = validateWorkspaceExistingPath(path, w.files);
+    if (!del.ok) return;
+    if (!window.confirm(`Delete "${del.filename}"?`)) return;
     pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
     resetManualEditGroup();
     setWorkspace((w) => {
-      if (!(path in w.files)) return w;
-      const { [path]: removed, ...rest } = w.files;
+      if (!(del.filename in w.files)) return w;
+      const { [del.filename]: removed, ...rest } = w.files;
       void removed;
       const keys = Object.keys(rest).sort((a, b) => a.localeCompare(b));
-      const nextActive = w.activePath === path ? keys[0] ?? null : w.activePath;
+      const nextActive = w.activePath === del.filename ? keys[0] ?? null : w.activePath;
       return { files: rest, activePath: nextActive };
     });
     setEditorNonce((n) => n + 1);
@@ -258,12 +258,10 @@ export default function App() {
 
   const handleRenameFile = useCallback((oldPath, newPath) => {
     const w = workspaceRef.current;
-    const next = typeof newPath === "string" ? newPath.trim() : "";
-    if (!(oldPath in w.files)) return false;
-    if (!next || next.length > 1024) return false;
-    if (/[/\\]/.test(next)) return false;
+    const v = validateWorkspaceRenameTarget(oldPath, newPath, w.files);
+    if (!v.ok) return false;
+    const next = v.filename;
     if (next === oldPath) return true;
-    if (next in w.files) return false;
     pushUndoSnapshot(cloneWorkspace(w));
     resetManualEditGroup();
     const content = w.files[oldPath];
@@ -277,9 +275,11 @@ export default function App() {
 
   const applyAiFileEdit = useCallback((tool) => {
     if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
-    const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
-    if (!filename || filename.length > 1024) return;
-    if (/[/\\]/.test(filename)) return;
+    const w = workspaceRef.current;
+    const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
+    const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action);
+    if (!v.ok) return;
+    const filename = v.filename;
     if (typeof tool.content !== "string") return;
     pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
     resetManualEditGroup();
@@ -298,11 +298,12 @@ export default function App() {
 
   const handleAiEditProposal = useCallback((tool) => {
     if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
-    const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
-    if (!filename || filename.length > 1024) return;
-    if (/[/\\]/.test(filename)) return;
-    if (typeof tool.content !== "string") return;
     const w = workspaceRef.current;
+    const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
+    const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action);
+    if (!v.ok) return;
+    const filename = v.filename;
+    if (typeof tool.content !== "string") return;
     const original = filename in w.files ? w.files[filename] ?? "" : "";
     setAiEditPreview({
       filename,
@@ -327,7 +328,7 @@ export default function App() {
   }, []);
 
   const aiPreviewLanguage = useMemo(
-    () => (aiEditPreview ? languageFromFilename(aiEditPreview.filename) : "plaintext"),
+    () => (aiEditPreview ? editorLanguageForWorkspacePath(aiEditPreview.filename) : "plaintext"),
     [aiEditPreview],
   );
 
@@ -409,7 +410,7 @@ export default function App() {
                 title={
                   canRunJavaScript
                     ? "Run current JavaScript on the server (sandboxed)"
-                    : "Open a .js / .jsx / .mjs / .cjs file to run"
+                    : "Open a .js file to run"
                 }
               >
                 <Play size={14} strokeWidth={2} aria-hidden />

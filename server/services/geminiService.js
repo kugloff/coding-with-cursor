@@ -4,13 +4,14 @@ import { parseAssistantModelOutput } from "../assistantOutput.js";
 const MODEL_NAME = "gemini-2.5-flash";
 
 const RESPONSE_FORMAT_RULES = `How to format your reply:
+- This workspace is JavaScript-only: every file path ends with ".js" and file bodies must be plain JavaScript (no TypeScript, JSX, Python, HTML-only modules, etc.). If the user asks for another language, answer in plain text and either translate the idea into JavaScript for a .js file or explain why you cannot — do not use create_file/edit_file with non-.js names or non-JS syntax.
 - For explanations, questions, or chat: respond with plain text only (do not wrap in JSON).
 - To replace an entire existing file, respond with ONLY a single JSON object and nothing else (no markdown fences, no prose). Shape:
   {"action":"edit_file","filename":"<path>","content":"<full new file text>"}
-  Use "edit_file" when the path already exists in the project file list (or you are overwriting the active file). The "filename" must match an exact path from the list (or the active file path).
+  Use "edit_file" when the path already exists in the project file list (or you are overwriting the active file). The "filename" must match an exact path from the list (or the active file path) and MUST end with ".js".
 - To add a new file that does not exist yet, use ONLY this shape:
-  {"action":"create_file","filename":"<path>","content":"<full new file text>"}
-  Use a simple filename (no slashes or backslashes). Do not use "create_file" for paths that already exist — use "edit_file" instead.
+  {"action":"create_file","filename":"<name>.js","content":"<full new file text>"}
+  The filename MUST end with ".js" (simple basename only: no slashes or backslashes). Do not use "create_file" for paths that already exist — use "edit_file" instead.
 - The "content" value must be a valid JSON string (escape quotes, newlines, etc.).`;
 
 /** Total characters of file bodies included in the prompt (soft cap). */
@@ -84,6 +85,7 @@ function buildPromptWithFileContext(message, files, currentFile) {
 
   parts.push(
     "You are a helpful coding assistant. The user is working in a web-based editor with multiple in-memory files.",
+    "STRICT RULE: The virtual workspace only contains JavaScript modules. Every path ends with .js; all file bodies you propose via edit_file or create_file must be valid JavaScript only.",
     "Use the sections below to answer questions about their code, suggest refactors, find bugs, or explain behavior.",
     "The ACTIVE editor file is named explicitly; treat the user's question as about that file unless they clearly refer to another path from the project list.",
     "If a file is truncated, say so briefly if it affects your answer.",

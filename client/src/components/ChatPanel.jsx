@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowUp, Sparkles, User } from "lucide-react";
+import { isValidJsWorkspaceFilename } from "../workspaceFilename.js";
 
 export default function ChatPanel({
   files = {},
@@ -73,6 +74,7 @@ export default function ChatPanel({
         typeof tool === "object" &&
         tool.action === "edit_file" &&
         typeof tool.filename === "string" &&
+        isValidJsWorkspaceFilename(tool.filename) &&
         typeof tool.content === "string";
 
       const isCreateTool =
@@ -80,6 +82,7 @@ export default function ChatPanel({
         typeof tool === "object" &&
         tool.action === "create_file" &&
         typeof tool.filename === "string" &&
+        isValidJsWorkspaceFilename(tool.filename) &&
         typeof tool.content === "string";
 
       const isFileProposal = isEditTool || isCreateTool;
@@ -118,8 +121,8 @@ export default function ChatPanel({
       <div className="chat-panel__thread" ref={listRef} role="log" aria-live="polite">
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
-            Cursor-style chat: ask about your code, or let the model return an{" "}
-            <code>edit_file</code> / <code>create_file</code> JSON actions — a side-by-side diff opens first; nothing is saved until you accept. Each request sends the{" "}
+            Cursor-style chat: ask about your JavaScript workspace (every tab is a <code>.js</code> file). The model may return{" "}
+            <code>edit_file</code> / <code>create_file</code> JSON for <code>.js</code> paths only — a side-by-side diff opens first; nothing is saved until you accept. Each request sends the{" "}
             <strong>project file list</strong>, the <strong>active file name</strong>, and{" "}
             <strong>full file contents</strong> (within server limits). Set <code>GEMINI_API_KEY</code> in{" "}
             <code>server/.env</code>.

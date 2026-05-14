@@ -1,3 +1,5 @@
+import { workspaceChatFileKeyErrorDetail } from "./workspaceFileValidation.js";
+
 /**
  * Validates optional `files` and `currentFile` from POST /chat JSON body.
  * @param {unknown} files
@@ -23,6 +25,10 @@ export function parseChatContext(files, currentFile) {
       if (key.length > 1024) {
         return { ok: false, detail: "A file path exceeds the maximum length (1024 characters)." };
       }
+      const keyErr = workspaceChatFileKeyErrorDetail(key);
+      if (keyErr) {
+        return { ok: false, detail: keyErr };
+      }
       if (typeof val !== "string") {
         return {
           ok: false,
@@ -41,6 +47,13 @@ export function parseChatContext(files, currentFile) {
   } else {
     const t = currentFile.trim();
     normalizedCurrent = t.length ? t : null;
+  }
+
+  if (normalizedCurrent != null) {
+    const curErr = workspaceChatFileKeyErrorDetail(normalizedCurrent);
+    if (curErr) {
+      return { ok: false, detail: curErr };
+    }
   }
 
   return { ok: true, files: normalizedFiles, currentFile: normalizedCurrent };

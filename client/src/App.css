@@ -377,6 +377,14 @@
   box-shadow: 0 0 0 1px var(--accent-soft);
 }
 
+.file-explorer__rename-suffix {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  user-select: none;
+}
+
 .file-explorer__rename-actions {
   display: flex;
   flex-shrink: 0;

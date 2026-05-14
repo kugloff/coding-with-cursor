@@ -1,55 +1,19 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Braces,
   Check,
-  File,
   FileCode,
-  FileJson,
-  FileText,
-  Image,
   PencilLine,
   Plus,
-  Settings2,
-  Terminal,
   Trash2,
   X,
 } from "lucide-react";
+import { workspaceJsBasenameForRename } from "../workspaceFilename.js";
+import { validateWorkspaceRename } from "../workspaceFileValidation.js";
 
-const IMG_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp"]);
-const SHELL_EXT = new Set([".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd"]);
-
-function FileGlyph({ path }) {
-  const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")).toLowerCase() : "";
+function FileGlyph() {
   const p = { className: "file-explorer__glyph", size: 15, strokeWidth: 1.75, "aria-hidden": true };
-  if (ext === ".json") return <FileJson {...p} />;
-  if (ext === ".md" || ext === ".txt") return <FileText {...p} />;
-  if (ext === ".yml" || ext === ".yaml") return <Braces {...p} />;
-  if (ext === ".env") return <Settings2 {...p} />;
-  if (IMG_EXT.has(ext)) return <Image {...p} />;
-  if (SHELL_EXT.has(ext)) return <Terminal {...p} />;
-  if (
-    ext === ".js" ||
-    ext === ".jsx" ||
-    ext === ".mjs" ||
-    ext === ".cjs" ||
-    ext === ".ts" ||
-    ext === ".tsx" ||
-    ext === ".vue" ||
-    ext === ".svelte" ||
-    ext === ".css" ||
-    ext === ".html" ||
-    ext === ".py" ||
-    ext === ".rs" ||
-    ext === ".go" ||
-    ext === ".rb" ||
-    ext === ".php" ||
-    ext === ".sql" ||
-    ext === ".toml"
-  ) {
-    return <FileCode {...p} />;
-  }
-  return <File {...p} />;
+  return <FileCode {...p} />;
 }
 
 const CONTEXT_MENU_W = 168;
@@ -111,7 +75,7 @@ export default function FileExplorer({
 
   function beginRename(path) {
     setRenamingPath(path);
-    setRenameDraft(path);
+    setRenameDraft(workspaceJsBasenameForRename(path));
   }
 
   function cancelRename() {
@@ -122,18 +86,14 @@ export default function FileExplorer({
   function commitRename(e) {
     e.preventDefault();
     if (!renamingPath) return;
-    const draft = renameDraft.trim();
-    if (!draft) {
-      window.alert("File name cannot be empty.");
+    const v = validateWorkspaceRename(renameDraft, paths, renamingPath);
+    if (!v.ok) {
+      window.alert(v.message);
       return;
     }
-    if (draft !== renamingPath && paths.includes(draft)) {
-      window.alert(`A file named "${draft}" already exists.`);
-      return;
-    }
-    const ok = onRenameFile?.(renamingPath, draft);
+    const ok = onRenameFile?.(renamingPath, v.filename);
     if (ok) cancelRename();
-    else window.alert('Could not rename: invalid name, or a file with that name already exists.');
+    else window.alert("Could not rename: invalid name, or a file with that name already exists.");
   }
 
   function handleDelete(path) {
@@ -204,7 +164,7 @@ export default function FileExplorer({
           New file
         </button>
       </div>
-      <p className="file-explorer__note">In-memory only — refresh clears files.</p>
+      <p className="file-explorer__note">In-memory .js files only — refresh clears files.</p>
       <ul ref={listRef} className="file-explorer__list" aria-label="Files">
         {paths.length === 0 ? (
           <li className="file-explorer__empty">No files yet.</li>
@@ -217,7 +177,7 @@ export default function FileExplorer({
               return (
                 <li key={path} className="file-explorer__item file-explorer__item--rename">
                   <form className="file-explorer__rename" onSubmit={commitRename}>
-                    <FileGlyph path={path} />
+                    <FileGlyph />
                     <input
                       ref={renameInputRef}
                       className="file-explorer__rename-input"
@@ -229,8 +189,12 @@ export default function FileExplorer({
                           cancelRename();
                         }
                       }}
-                      aria-label="New file name"
+                      aria-label="File base name (extension stays .js)"
+                      title='Only the name before ".js" can change; any extension you type is ignored.'
                     />
+                    <span className="file-explorer__rename-suffix" aria-hidden>
+                      .js
+                    </span>
                     <div className="file-explorer__rename-actions">
                       <button type="submit" className="file-explorer__rename-save" aria-label="Save name">
                         <Check size={14} strokeWidth={2.5} />
@@ -258,7 +222,7 @@ export default function FileExplorer({
                     onClick={() => onSelect(path)}
                     aria-current={isActive ? "true" : undefined}
                   >
-                    <FileGlyph path={path} />
+                    <FileGlyph />
                     <span className="file-explorer__file-name">{path}</span>
                   </button>
                   <div className="file-explorer__actions">
