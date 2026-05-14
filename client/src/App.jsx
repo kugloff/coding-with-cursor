@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LayoutPanelLeft, MessageSquare, PanelsTopLeft, Sparkles } from "lucide-react";
+import { LayoutPanelLeft, MessageSquare, PanelsTopLeft, Redo2, Sparkles, Undo2 } from "lucide-react";
 import "./App.css";
 import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
@@ -44,14 +44,28 @@ function nextUntitledName(files) {
   return name;
 }
 
+const MAX_UNDO = 40;
+
+/** Shallow snapshot: new `files` object, same string values. */
+function cloneWorkspace(w) {
+  return { files: { ...w.files }, activePath: w.activePath };
+}
+
 export default function App() {
   const [workspace, setWorkspace] = useState({
     files: { ...DEFAULT_FILES },
     activePath: "main.js",
   });
   const [editorNonce, setEditorNonce] = useState(0);
-  const [aiEditToastVisible, setAiEditToastVisible] = useState(false);
+  /** `null` = hidden; otherwise toast shows which file the AI updated. */
+  const [aiEditToastFile, setAiEditToastFile] = useState(null);
   const toastTimerRef = useRef(null);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  /** Bumps when undo or redo stacks change so the top bar re-renders. */
+  const [historyTick, setHistoryTick] = useState(0);
+  /** One undo entry per “typing burst” per file until select / other op resets. */
+  const manualEditGroupRef = useRef({ path: null, captured: false });
 
   const workspaceRef = useRef(workspace);
   useEffect(() => {
@@ -64,11 +78,60 @@ export default function App() {
     };
   }, []);
 
-  const showAiEditToast = useCallback(() => {
+  const bumpHistoryUi = useCallback(() => {
+    setHistoryTick((t) => t + 1);
+  }, []);
+
+  const pushUndoSnapshot = useCallback(
+    (snapshot) => {
+      redoStackRef.current = [];
+      const stack = undoStackRef.current;
+      const next = [...stack, snapshot];
+      undoStackRef.current = next.length > MAX_UNDO ? next.slice(-MAX_UNDO) : next;
+      bumpHistoryUi();
+    },
+    [bumpHistoryUi],
+  );
+
+  const resetManualEditGroup = useCallback(() => {
+    manualEditGroupRef.current = { path: null, captured: false };
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const stack = undoStackRef.current;
+    if (stack.length === 0) return;
+    const current = cloneWorkspace(workspaceRef.current);
+    const previous = stack[stack.length - 1];
+    undoStackRef.current = stack.slice(0, -1);
+    const rstack = redoStackRef.current;
+    const rnext = [...rstack, current];
+    redoStackRef.current = rnext.length > MAX_UNDO ? rnext.slice(-MAX_UNDO) : rnext;
+    bumpHistoryUi();
+    resetManualEditGroup();
+    setWorkspace(previous);
+    setEditorNonce((n) => n + 1);
+  }, [bumpHistoryUi, resetManualEditGroup]);
+
+  const handleRedo = useCallback(() => {
+    const stack = redoStackRef.current;
+    if (stack.length === 0) return;
+    const current = cloneWorkspace(workspaceRef.current);
+    const nextState = stack[stack.length - 1];
+    redoStackRef.current = stack.slice(0, -1);
+    const ustack = undoStackRef.current;
+    const unext = [...ustack, current];
+    undoStackRef.current = unext.length > MAX_UNDO ? unext.slice(-MAX_UNDO) : unext;
+    bumpHistoryUi();
+    resetManualEditGroup();
+    setWorkspace(nextState);
+    setEditorNonce((n) => n + 1);
+  }, [bumpHistoryUi, resetManualEditGroup]);
+
+  const showAiEditToast = useCallback((filename) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setAiEditToastVisible(true);
+    setAiEditToastFile(typeof filename === "string" && filename.trim() ? filename.trim() : "file");
     toastTimerRef.current = window.setTimeout(() => {
-      setAiEditToastVisible(false);
+      setAiEditToastFile(null);
       toastTimerRef.current = null;
     }, 3200);
   }, []);
@@ -79,25 +142,36 @@ export default function App() {
   const editorValue = activePath ? files[activePath] ?? "" : "";
   const editorLanguage = activePath ? languageFromFilename(activePath) : "javascript";
 
-  const handleEditorChange = useCallback((value) => {
-    const next = value ?? "";
-    setWorkspace((w) => {
-      if (!w.activePath) return w;
-      return {
-        ...w,
-        files: { ...w.files, [w.activePath]: next },
-      };
-    });
-  }, []);
+  const handleEditorChange = useCallback(
+    (value) => {
+      const next = value ?? "";
+      const w = workspaceRef.current;
+      if (!w.activePath) return;
+      const path = w.activePath;
+      const g = manualEditGroupRef.current;
+      if (g.path !== path || !g.captured) {
+        pushUndoSnapshot(cloneWorkspace(w));
+        manualEditGroupRef.current = { path, captured: true };
+      }
+      setWorkspace((cur) => ({
+        ...cur,
+        files: { ...cur.files, [path]: next },
+      }));
+    },
+    [pushUndoSnapshot],
+  );
 
   const handleSelectFile = useCallback((path) => {
+    resetManualEditGroup();
     setWorkspace((w) => {
       if (!(path in w.files)) return w;
       return { ...w, activePath: path };
     });
-  }, []);
+  }, [resetManualEditGroup]);
 
   const handleCreateFile = useCallback(() => {
+    pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
+    resetManualEditGroup();
     setWorkspace((w) => {
       const name = nextUntitledName(w.files);
       return {
@@ -105,10 +179,12 @@ export default function App() {
         activePath: name,
       };
     });
-  }, []);
+  }, [pushUndoSnapshot, resetManualEditGroup]);
 
   const handleDeleteFile = useCallback((path) => {
     if (!window.confirm(`Delete "${path}"?`)) return;
+    pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
+    resetManualEditGroup();
     setWorkspace((w) => {
       if (!(path in w.files)) return w;
       const { [path]: removed, ...rest } = w.files;
@@ -118,7 +194,7 @@ export default function App() {
       return { files: rest, activePath: nextActive };
     });
     setEditorNonce((n) => n + 1);
-  }, []);
+  }, [pushUndoSnapshot, resetManualEditGroup]);
 
   const handleRenameFile = useCallback((oldPath, newPath) => {
     const w = workspaceRef.current;
@@ -128,6 +204,8 @@ export default function App() {
     if (/[/\\]/.test(next)) return false;
     if (next === oldPath) return true;
     if (next in w.files) return false;
+    pushUndoSnapshot(cloneWorkspace(w));
+    resetManualEditGroup();
     const content = w.files[oldPath];
     const { [oldPath]: _, ...rest } = w.files;
     setWorkspace({
@@ -135,21 +213,26 @@ export default function App() {
       activePath: w.activePath === oldPath ? next : w.activePath,
     });
     return true;
-  }, []);
+  }, [pushUndoSnapshot, resetManualEditGroup]);
 
   const handleChatToolCall = useCallback((tool) => {
     if (!tool || tool.action !== "edit_file") return;
     const filename = typeof tool.filename === "string" ? tool.filename.trim() : "";
     if (!filename || filename.length > 1024) return;
     if (typeof tool.content !== "string") return;
+    pushUndoSnapshot(cloneWorkspace(workspaceRef.current));
+    resetManualEditGroup();
     setWorkspace((w) => ({
       ...w,
       files: { ...w.files, [filename]: tool.content },
       activePath: filename,
     }));
     setEditorNonce((n) => n + 1);
-    showAiEditToast();
-  }, [showAiEditToast]);
+    showAiEditToast(filename);
+  }, [pushUndoSnapshot, resetManualEditGroup, showAiEditToast]);
+
+  const canUndo = useMemo(() => undoStackRef.current.length > 0, [historyTick]);
+  const canRedo = useMemo(() => redoStackRef.current.length > 0, [historyTick]);
 
   return (
     <div className="workspace">
@@ -160,10 +243,34 @@ export default function App() {
           </span>
           <span className="workspace__title">Workspace</span>
         </div>
-        <span className="workspace__meta">
-          <Sparkles size={12} strokeWidth={2} className="workspace__meta-glow" aria-hidden />
-          Vite · React · Monaco
-        </span>
+        <div className="workspace__topbar-right">
+          <div className="workspace__history-btns" role="group" aria-label="Workspace history">
+            <button
+              type="button"
+              className="workspace__history-btn"
+              onClick={handleUndo}
+              disabled={!canUndo}
+              title={canUndo ? "Restore previous workspace snapshot" : "Nothing to undo"}
+            >
+              <Undo2 size={14} strokeWidth={2} aria-hidden />
+              Undo
+            </button>
+            <button
+              type="button"
+              className="workspace__history-btn"
+              onClick={handleRedo}
+              disabled={!canRedo}
+              title={canRedo ? "Re-apply the next workspace snapshot" : "Nothing to redo"}
+            >
+              <Redo2 size={14} strokeWidth={2} aria-hidden />
+              Redo
+            </button>
+          </div>
+          <span className="workspace__meta">
+            <Sparkles size={12} strokeWidth={2} className="workspace__meta-glow" aria-hidden />
+            Vite · React · Monaco
+          </span>
+        </div>
       </header>
 
       <div className="workspace__body">
@@ -214,9 +321,9 @@ export default function App() {
         </aside>
       </div>
 
-      {aiEditToastVisible && (
+      {aiEditToastFile && (
         <div className="ai-toast" role="status" aria-live="polite">
-          File updated by AI
+          File updated by AI: {aiEditToastFile}
         </div>
       )}
     </div>

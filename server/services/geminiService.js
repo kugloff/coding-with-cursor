@@ -7,6 +7,7 @@ const RESPONSE_FORMAT_RULES = `How to format your reply:
 - For explanations, questions, or chat: respond with plain text only (do not wrap in JSON).
 - To replace an entire file in the user's workspace, respond with ONLY a single JSON object and nothing else (no markdown fences, no prose). Shape:
   {"action":"edit_file","filename":"<path>","content":"<full new file text>"}
+  The "filename" field must be an exact path from the project file list above (or the active file path). Prefer the active file when the user did not ask to edit a different path.
   The "content" value must be a valid JSON string (escape quotes, newlines, etc.).`;
 
 /** Total characters of file bodies included in the prompt (soft cap). */
@@ -34,52 +35,92 @@ export class GeminiApiError extends Error {
 }
 
 /**
+ * Append file body respecting per-file and total context limits; returns remaining character budget.
+ * @param {string[]} parts
+ * @param {string | undefined} raw
+ * @param {number} budget
+ * @returns {number}
+ */
+function appendFileBody(parts, raw, budget) {
+  if (typeof raw !== "string") {
+    parts.push("[content was not provided for this path]", "");
+    return budget;
+  }
+  let body = raw;
+  let truncated = "";
+  if (body.length > MAX_FILE_CHARS) {
+    body = body.slice(0, MAX_FILE_CHARS);
+    truncated = "\n[…truncated: file exceeded per-file limit]";
+  }
+  if (body.length > budget) {
+    body = body.slice(0, budget);
+    truncated += "\n[…truncated: workspace context limit]";
+    budget = 0;
+  } else {
+    budget -= body.length;
+  }
+  parts.push(body + truncated, "");
+  return budget;
+}
+
+/**
  * @param {Record<string, string>} files
  * @param {string | null | undefined} currentFile
  * @returns {string}
  */
 function buildPromptWithFileContext(message, files, currentFile) {
+  const fileMap = files && typeof files === "object" && !Array.isArray(files) ? files : {};
+  const pathsSorted = Object.keys(fileMap)
+    .filter((p) => typeof fileMap[p] === "string")
+    .sort((a, b) => a.localeCompare(b));
+
+  const current =
+    typeof currentFile === "string" && currentFile.trim() ? currentFile.trim() : null;
+
   const parts = [];
 
   parts.push(
     "You are a helpful coding assistant. The user is working in a web-based editor with multiple in-memory files.",
-    "Use the file contents below to answer questions about their code, suggest refactors, find bugs, or explain behavior.",
+    "Use the sections below to answer questions about their code, suggest refactors, find bugs, or explain behavior.",
+    "The ACTIVE editor file is named explicitly; treat the user's question as about that file unless they clearly refer to another path from the project list.",
     "If a file is truncated, say so briefly if it affects your answer.",
     ""
   );
 
-  const current =
-    typeof currentFile === "string" && currentFile.trim()
-      ? currentFile.trim()
-      : null;
-  parts.push(`Currently focused file: ${current ?? "(none)"}`, "");
+  parts.push(
+    "--- Project file list (exact paths; use these strings for edit_file.filename) ---",
+    pathsSorted.length ? pathsSorted.join(", ") : "(no files in workspace payload)",
+    ""
+  );
 
-  if (files && typeof files === "object") {
-    const paths = Object.keys(files).sort((a, b) => a.localeCompare(b));
-    let budget = MAX_CONTEXT_CHARS;
+  parts.push("--- Active editor file (filename only) ---", current ?? "(none — no file is focused)", "");
 
-    for (const path of paths) {
-      const raw = files[path];
-      if (typeof raw !== "string") continue;
+  let budget = MAX_CONTEXT_CHARS;
 
-      let body = raw;
-      let truncated = "";
-      if (body.length > MAX_FILE_CHARS) {
-        body = body.slice(0, MAX_FILE_CHARS);
-        truncated = "\n[…truncated: file exceeded per-file limit]";
-      }
-      if (body.length > budget) {
-        body = body.slice(0, budget);
-        truncated += "\n[…truncated: workspace context limit]";
-        budget = 0;
-      } else {
-        budget -= body.length;
-      }
+  if (current) {
+    parts.push(
+      "--- Current file (full content; this is the focused tab in the editor) ---",
+      `Filename: ${current}`,
+      ""
+    );
+    const activeRaw = fileMap[current];
+    if (activeRaw === undefined) {
+      parts.push(
+        "[Note: this path is not present in the files map — the client did not send content for it.]",
+        ""
+      );
+    } else {
+      budget = appendFileBody(parts, activeRaw, budget);
+    }
+  }
 
-      const marker = current === path ? " (focused)" : "";
-      parts.push(`--- File: ${path}${marker} ---`, body + truncated, "");
-
+  const others = pathsSorted.filter((p) => p !== current);
+  if (others.length > 0 && budget > 0) {
+    parts.push("--- Other workspace files ---", "");
+    for (const path of others) {
       if (budget <= 0) break;
+      parts.push(`Filename: ${path}`, "");
+      budget = appendFileBody(parts, fileMap[path], budget);
     }
   }
 
@@ -90,6 +131,7 @@ function buildPromptWithFileContext(message, files, currentFile) {
 /**
  * Calls Google Gemini with optional workspace file context.
  * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null }} input
+ *   `files` maps path → content (empty strings allowed). `currentFile` selects the active tab; its body is placed first in the prompt when present in `files`.
  * @returns {Promise<{ response: string, toolCall: null | { action: string, filename: string, content: string } }>}
  */
 export async function generateResponse({ message, files, currentFile }) {
@@ -100,14 +142,14 @@ export async function generateResponse({ message, files, currentFile }) {
     );
   }
 
-  const hasContext =
-    files &&
-    typeof files === "object" &&
-    Object.keys(files).length > 0 &&
-    Object.values(files).some((v) => typeof v === "string" && v.length > 0);
+  const fileMap = files && typeof files === "object" && !Array.isArray(files) ? files : {};
+  const hasAnyFileKeys = Object.keys(fileMap).some((k) => typeof fileMap[k] === "string");
+  const hasActivePath =
+    typeof currentFile === "string" && currentFile.trim().length > 0;
+  const hasContext = hasAnyFileKeys || hasActivePath;
 
   const prompt = hasContext
-    ? buildPromptWithFileContext(message, files, currentFile)
+    ? buildPromptWithFileContext(message, fileMap, currentFile)
     : `${RESPONSE_FORMAT_RULES}\n\n--- User message ---\n${message.trim()}`;
 
   const genAI = new GoogleGenerativeAI(apiKey.trim());

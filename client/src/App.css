@@ -19,6 +19,49 @@
   backdrop-filter: blur(10px);
 }
 
+.workspace__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.workspace__history-btns {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.workspace__history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+
+.workspace__history-btn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+  background: var(--accent-soft);
+}
+
+.workspace__history-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .workspace__brand {
   display: flex;
   align-items: center;

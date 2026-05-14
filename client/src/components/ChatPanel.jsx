@@ -77,11 +77,12 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
       const textPart = data.response.trim();
 
       let assistantBody = textPart;
-      if (isEditTool && !textPart) {
-        assistantBody = "File updated by AI.";
-      }
 
-      if (!assistantBody && !isEditTool) {
+      if (isEditTool) {
+        const edited = tool.filename.trim();
+        const prefix = `Edited workspace file: \`${edited}\``;
+        assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}\n\nFull file content was replaced via edit_file.`;
+      } else if (!assistantBody) {
         throw new Error("Invalid response from server (empty reply)");
       }
 
@@ -100,7 +101,8 @@ export default function ChatPanel({ files = {}, currentFile = null, onToolCall }
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
             Cursor-style chat: ask about your code, or let the model return an{" "}
-            <code>edit_file</code> JSON action. Workspace is sent with each message. Set{" "}
+            <code>edit_file</code> JSON action. Each request sends the <strong>project file list</strong>, the{" "}
+            <strong>active file name</strong>, and <strong>full file contents</strong> (within server limits). Set{" "}
             <code>GEMINI_API_KEY</code> in <code>server/.env</code>.
           </p>
         )}

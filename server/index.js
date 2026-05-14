@@ -38,7 +38,7 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({
       error: "Invalid request body",
       detail:
-        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content), "currentFile" (string).',
+        'Expected JSON with a non-empty string "message". Optional: "files" (object path → content, empty strings OK), "currentFile" (string | null, active editor path).',
     });
   }
 
