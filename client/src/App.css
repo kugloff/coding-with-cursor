@@ -69,6 +69,16 @@
   box-shadow: 0 0 0 1px var(--active-ring);
 }
 
+.workspace__env-toggle--multi {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.workspace__env-toggle--multi .workspace__env-btn {
+  padding: 0.26rem 0.42rem;
+  font-size: 0.625rem;
+}
+
 .workspace__share-btns {
   display: flex;
   align-items: center;
@@ -915,9 +925,10 @@
 .chat-panel__header {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem 0.5rem;
   padding: 0.45rem 0.55rem 0.35rem;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--topbar-scrim);
@@ -933,6 +944,7 @@
 
 .chat-panel__mode-toggle {
   display: inline-flex;
+  flex-wrap: wrap;
   padding: 2px;
   border-radius: var(--radius-md);
   background: var(--bg-inset);
@@ -966,6 +978,58 @@
   color: var(--text-primary);
   background: var(--active-fill);
   box-shadow: 0 0 0 1px var(--active-ring);
+}
+
+.chat-panel__mode-btn {
+  padding: 0.26rem 0.5rem;
+}
+
+.chat-panel__translate-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-basis: 100%;
+  padding-top: 0.1rem;
+}
+
+.chat-panel__translate-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin-right: 0.15rem;
+}
+
+.chat-panel__translate-btn {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  margin: 0;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--bg-inset);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.chat-panel__translate-btn:hover:not(:disabled) {
+  color: var(--text-secondary);
+  border-color: var(--accent-border);
+}
+
+.chat-panel__translate-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-panel__translate-btn--active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
 }
 
 .chat-panel__thread {
@@ -1482,6 +1546,11 @@
   font-weight: 600;
   color: var(--text-dim);
   margin-right: 0.25rem;
+}
+
+.ai-edit-preview__workspace {
+  font-weight: 500;
+  color: var(--accent);
 }
 
 .ai-edit-preview__diff-wrap {

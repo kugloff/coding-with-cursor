@@ -25,7 +25,12 @@ import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
 import AiEditPreviewModal from "./components/AiEditPreviewModal.jsx";
-import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "./workspaceFilename.js";
+import {
+  WORKSPACE_ENVIRONMENT_IDS,
+  WORKSPACE_ENVIRONMENTS,
+  normalizeWorkspaceEnvironment,
+} from "@shared/workspaceEnvironments.js";
+import { isValidWorkspaceFilename } from "@shared/workspaceFilename.js";
 import {
   validateWorkspaceAiFileTarget,
   validateWorkspaceCreate,
@@ -41,13 +46,18 @@ import {
 
 const MAX_UNDO = 40;
 
-function editorLanguageForWorkspacePath(filename) {
-  if (!filename) return "javascript";
-  return isValidJsWorkspaceFilename(filename) ? "javascript" : "plaintext";
+function createEnvStacks() {
+  return Object.fromEntries(WORKSPACE_ENVIRONMENT_IDS.map((id) => [id, []]));
+}
+
+function editorLanguageForWorkspacePath(filename, envId = "js") {
+  if (!filename) return WORKSPACE_ENVIRONMENTS[envId]?.monaco ?? "plaintext";
+  if (isValidWorkspaceFilename(filename, envId)) return WORKSPACE_ENVIRONMENTS[envId]?.monaco ?? "plaintext";
+  return "plaintext";
 }
 
 function nextUntitledName(files, environment) {
-  const ext = environment === "python" ? ".py" : ".js";
+  const ext = WORKSPACE_ENVIRONMENTS[environment]?.ext ?? ".txt";
   let n = 1;
   let name = `untitled-${n}${ext}`;
   while (name in files) {
@@ -83,8 +93,8 @@ export default function App() {
   const [runOutputMinimized, setRunOutputMinimized] = useState(false);
   const [colorTheme, setColorTheme] = useState(() => loadTheme());
   const toastTimerRef = useRef(null);
-  const undoByEnv = useRef({ js: [], python: [] });
-  const redoByEnv = useRef({ js: [], python: [] });
+  const undoByEnv = useRef(createEnvStacks());
+  const redoByEnv = useRef(createEnvStacks());
   const [historyTick, setHistoryTick] = useState(0);
   const manualEditGroupRef = useRef({ path: null, captured: false });
 
@@ -172,14 +182,14 @@ export default function App() {
   const handleResetWorkspace = useCallback(() => {
     if (
       !window.confirm(
-        "Reset both JavaScript and Python workspaces to defaults? This removes the saved copy in this browser and clears undo/redo for both environments.",
+        "Reset all workspaces (JavaScript, Python, C#) to defaults? This removes the saved copy in this browser and clears undo/redo for every environment.",
       )
     ) {
       return;
     }
     clearPersistedWorkspace();
-    undoByEnv.current = { js: [], python: [] };
-    redoByEnv.current = { js: [], python: [] };
+    undoByEnv.current = createEnvStacks();
+    redoByEnv.current = createEnvStacks();
     bumpHistoryUi();
     resetManualEditGroup();
     setDualWorkspace(getDefaultDualWorkspace());
@@ -204,17 +214,15 @@ export default function App() {
   const sortedPaths = useMemo(() => Object.keys(files).sort((a, b) => a.localeCompare(b)), [files]);
 
   const editorValue = activePath ? files[activePath] ?? "" : "";
+  const envMeta = WORKSPACE_ENVIRONMENTS[environment] ?? WORKSPACE_ENVIRONMENTS.js;
   const editorLanguage =
-    environment === "python"
-      ? isValidPyWorkspaceFilename(activePath)
-        ? "python"
-        : "plaintext"
-      : editorLanguageForWorkspacePath(activePath);
+    activePath && isValidWorkspaceFilename(activePath, environment)
+      ? envMeta.monaco
+      : "plaintext";
 
-  const canRunCode = Boolean(
-    activePath &&
-      (environment === "python" ? isValidPyWorkspaceFilename(activePath) : isValidJsWorkspaceFilename(activePath)),
-  );
+  const canUseActiveFile = Boolean(activePath && isValidWorkspaceFilename(activePath, environment));
+  const canRunCode = canUseActiveFile && envMeta.runSupported;
+  const canFormatCode = canUseActiveFile && envMeta.formatSupported;
 
   useEffect(() => {
     setRunOutput("");
@@ -228,8 +236,8 @@ export default function App() {
     const slice = dualWorkspaceRef.current[env];
     const ap = slice.activePath;
     if (!ap) return;
-    if (env === "python" && !isValidPyWorkspaceFilename(ap)) return;
-    if (env === "js" && !isValidJsWorkspaceFilename(ap)) return;
+    const meta = WORKSPACE_ENVIRONMENTS[env];
+    if (!meta?.runSupported || !isValidWorkspaceFilename(ap, env)) return;
     const code = typeof slice.files[ap] === "string" ? slice.files[ap] : "";
     setRunPending(true);
     setRunOutputMinimized(false);
@@ -297,8 +305,11 @@ export default function App() {
     const w = dualWorkspaceRef.current[env];
     const ap = w.activePath;
     if (!ap) return;
-    if (env === "python" && !isValidPyWorkspaceFilename(ap)) return;
-    if (env === "js" && !isValidJsWorkspaceFilename(ap)) return;
+    const meta = WORKSPACE_ENVIRONMENTS[env];
+    if (!meta?.formatSupported || !isValidWorkspaceFilename(ap, env)) {
+      showToast(`Format is not available for ${meta?.lang ?? env} yet`);
+      return;
+    }
 
     const code = typeof w.files[ap] === "string" ? w.files[ap] : "";
     setFormatPending(true);
@@ -311,7 +322,7 @@ export default function App() {
         const res = await fetch("/format", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, environment: "python" }),
+          body: JSON.stringify({ code, environment: env }),
         });
 
         let data = {};
@@ -351,7 +362,9 @@ export default function App() {
           files: { ...dw[env].files, [ap]: formatted },
         },
       }));
-      showToast(env === "js" ? "Formatted with Prettier" : "Formatted with Black");
+      const formatTool =
+        env === "js" ? "Prettier" : env === "csharp" ? "CSharpier" : "Black";
+      showToast(`Formatted with ${formatTool}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Format failed";
       showToast(msg);
@@ -462,9 +475,9 @@ export default function App() {
   );
 
   const applyAiFileEdit = useCallback(
-    (tool) => {
+    (tool, options = {}) => {
       if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
-      const e = dualWorkspaceRef.current.environment;
+      const e = options.targetEnvironment ?? dualWorkspaceRef.current.environment;
       const w = dualWorkspaceRef.current[e];
       const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
       const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action, e);
@@ -473,8 +486,10 @@ export default function App() {
       if (typeof tool.content !== "string") return;
       pushUndoSnapshot(cloneWorkspace(w));
       resetManualEditGroup();
+      const switchToTarget = Boolean(options.switchToTarget);
       setDualWorkspace((dw) => ({
         ...dw,
+        ...(switchToTarget ? { environment: e } : {}),
         [e]: {
           ...dw[e],
           files: { ...dw[e].files, [filename]: tool.content },
@@ -482,43 +497,50 @@ export default function App() {
         },
       }));
       setEditorNonce((n) => n + 1);
+      const envLabel = WORKSPACE_ENVIRONMENTS[e]?.lang ?? e;
       const toastMsg =
         tool.action === "create_file"
-          ? `File created by AI: ${filename}`
-          : `File updated by AI: ${filename}`;
+          ? `File created in ${envLabel}: ${filename}`
+          : `File updated in ${envLabel}: ${filename}`;
       showToast(toastMsg);
     },
     [pushUndoSnapshot, resetManualEditGroup, showToast],
   );
 
-  const handleAiEditProposal = useCallback(
-    (tool) => {
-      if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
-      const e = dualWorkspaceRef.current.environment;
-      const w = dualWorkspaceRef.current[e];
-      const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
-      const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action, e);
-      if (!v.ok) return;
-      const filename = v.filename;
-      if (typeof tool.content !== "string") return;
-      const original = filename in w.files ? w.files[filename] ?? "" : "";
-      setAiEditPreview({
-        filename,
-        original,
-        modified: tool.content,
-        action: tool.action,
-      });
-    },
-    [],
-  );
+  const handleAiEditProposal = useCallback((tool, options = {}) => {
+    if (!tool || (tool.action !== "edit_file" && tool.action !== "create_file")) return;
+    const e = options.targetEnvironment ?? dualWorkspaceRef.current.environment;
+    const w = dualWorkspaceRef.current[e];
+    const filenameRaw = typeof tool.filename === "string" ? tool.filename : "";
+    const v = validateWorkspaceAiFileTarget(filenameRaw, w.files, tool.action, e);
+    if (!v.ok) return;
+    const filename = v.filename;
+    if (typeof tool.content !== "string") return;
+    const original = filename in w.files ? w.files[filename] ?? "" : "";
+    setAiEditPreview({
+      filename,
+      original,
+      modified: tool.content,
+      action: tool.action,
+      targetEnvironment: e,
+      switchToTarget: Boolean(options.switchToTarget),
+      workspaceLabel: WORKSPACE_ENVIRONMENTS[e]?.lang ?? e,
+    });
+  }, []);
 
   const handleAcceptAiEditPreview = useCallback(() => {
     if (!aiEditPreview) return;
-    applyAiFileEdit({
-      action: aiEditPreview.action,
-      filename: aiEditPreview.filename,
-      content: aiEditPreview.modified,
-    });
+    applyAiFileEdit(
+      {
+        action: aiEditPreview.action,
+        filename: aiEditPreview.filename,
+        content: aiEditPreview.modified,
+      },
+      {
+        targetEnvironment: aiEditPreview.targetEnvironment,
+        switchToTarget: aiEditPreview.switchToTarget,
+      },
+    );
     setAiEditPreview(null);
   }, [aiEditPreview, applyAiFileEdit]);
 
@@ -528,10 +550,8 @@ export default function App() {
 
   const aiPreviewLanguage = useMemo(() => {
     if (!aiEditPreview) return "plaintext";
-    if (environment === "python") {
-      return isValidPyWorkspaceFilename(aiEditPreview.filename) ? "python" : "plaintext";
-    }
-    return editorLanguageForWorkspacePath(aiEditPreview.filename);
+    const previewEnv = aiEditPreview.targetEnvironment ?? environment;
+    return editorLanguageForWorkspacePath(aiEditPreview.filename, previewEnv);
   }, [aiEditPreview, environment]);
 
   const handleCopyRawFile = useCallback(
@@ -565,10 +585,10 @@ export default function App() {
     if (exportZipPending) return;
     setExportZipPending(true);
     try {
-      await downloadDualWorkspaceZip({
-        js: dualWorkspaceRef.current.js,
-        python: dualWorkspaceRef.current.python,
-      });
+      const slices = Object.fromEntries(
+        WORKSPACE_ENVIRONMENT_IDS.map((id) => [id, dualWorkspaceRef.current[id]]),
+      );
+      await downloadDualWorkspaceZip(slices);
       showToast("Workspace ZIP downloaded");
     } catch {
       showToast("ZIP export failed");
@@ -582,7 +602,7 @@ export default function App() {
   }, []);
 
   const setEnvironment = useCallback((next) => {
-    const n = next === "python" ? "python" : "js";
+    const n = normalizeWorkspaceEnvironment(next);
     setDualWorkspace((dw) => {
       if (dw.environment === n) return dw;
       return { ...dw, environment: n };
@@ -623,25 +643,22 @@ export default function App() {
               Light
             </button>
           </div>
-          <div className="workspace__env-toggle" role="group" aria-label="Workspace environment">
-            <button
-              type="button"
-              className={`workspace__env-btn${environment === "js" ? " workspace__env-btn--active" : ""}`}
-              onClick={() => setEnvironment("js")}
-              disabled={runPending}
-              aria-pressed={environment === "js"}
-            >
-              JavaScript
-            </button>
-            <button
-              type="button"
-              className={`workspace__env-btn${environment === "python" ? " workspace__env-btn--active" : ""}`}
-              onClick={() => setEnvironment("python")}
-              disabled={runPending}
-              aria-pressed={environment === "python"}
-            >
-              Python
-            </button>
+          <div className="workspace__env-toggle workspace__env-toggle--multi" role="group" aria-label="Workspace environment">
+            {WORKSPACE_ENVIRONMENT_IDS.map((envId) => {
+              const meta = WORKSPACE_ENVIRONMENTS[envId];
+              return (
+                <button
+                  key={envId}
+                  type="button"
+                  className={`workspace__env-btn${environment === envId ? " workspace__env-btn--active" : ""}`}
+                  onClick={() => setEnvironment(envId)}
+                  disabled={runPending}
+                  aria-pressed={environment === envId}
+                >
+                  {meta.lang}
+                </button>
+              );
+            })}
           </div>
           <div className="workspace__share-btns" role="group" aria-label="Export and share">
             <button
@@ -649,7 +666,7 @@ export default function App() {
               className="workspace__share-btn"
               onClick={handleExportZip}
               disabled={exportZipPending}
-              title="Download javascript/ and python/ folders as a ZIP (all tabs in both workspaces)"
+              title="Download all workspace folders (JavaScript, Python, C#) as a ZIP"
             >
               <Archive size={14} strokeWidth={2} aria-hidden />
               {exportZipPending ? "Exporting…" : "Export ZIP"}
@@ -725,7 +742,7 @@ export default function App() {
                 {activePath || "—"}
               </span>
               <span className="pane-header__pill pane-header__pill--muted" title="Active workspace environment">
-                {environment === "python" ? "Python" : "JS"}
+                {envMeta.lang}
               </span>
               <button
                 type="button"
@@ -755,15 +772,17 @@ export default function App() {
                 type="button"
                 className="editor-toolbar-btn"
                 onClick={handleFormatDocument}
-                disabled={!canRunCode || formatPending || runPending}
+                disabled={!canFormatCode || formatPending || runPending}
                 title={
-                  !canRunCode
-                    ? environment === "python"
-                      ? "Open a .py file to format"
-                      : "Open a .js file to format"
-                    : environment === "python"
-                      ? "Format with Black (local subprocess; pip install black)"
-                      : "Format with Prettier (in browser)"
+                  !canUseActiveFile
+                    ? `Open a ${envMeta.ext} file to format`
+                    : !envMeta.formatSupported
+                      ? `Format is not available for ${envMeta.lang} yet`
+                      : environment === "python"
+                        ? "Format with Black (local subprocess; pip install black)"
+                        : environment === "csharp"
+                          ? "Format with CSharpier (dotnet tool install -g csharpier on the server host)"
+                          : "Format with Prettier (in browser)"
                 }
               >
                 <Wand2 size={14} strokeWidth={2} aria-hidden />
@@ -775,13 +794,13 @@ export default function App() {
                 onClick={handleRunCode}
                 disabled={!canRunCode || runPending || formatPending}
                 title={
-                  !canRunCode
-                    ? environment === "python"
-                      ? "Open a .py file to run"
-                      : "Open a .js file to run"
-                    : environment === "python"
-                      ? "Run active file as Python on the server (subprocess; treat as untrusted)"
-                      : "Run active file as JavaScript on the server (vm2 sandbox)"
+                  !canUseActiveFile
+                    ? `Open a ${envMeta.ext} file to run`
+                    : !envMeta.runSupported
+                      ? `Run is not available for ${envMeta.lang} yet`
+                      : environment === "python"
+                        ? "Run active file as Python on the server (subprocess; treat as untrusted)"
+                        : "Run active file as JavaScript on the server (vm2 sandbox)"
                 }
               >
                 <Play size={14} strokeWidth={2} aria-hidden />
@@ -802,7 +821,7 @@ export default function App() {
             <div
               className={`run-output${runOutputMinimized ? " run-output--minimized" : ""}`}
               role="region"
-              aria-label={environment === "python" ? "Python run output" : "JavaScript run output"}
+              aria-label={`${envMeta.lang} run output`}
               aria-expanded={!runOutputMinimized}
             >
               <div className="run-output__head">
@@ -848,9 +867,11 @@ export default function App() {
                 <div className="run-output__body-wrap">
                   {!runPending && !runOutput && !runError && (
                     <p className="run-output__placeholder">
-                      {environment === "python"
-                        ? "Run sends the active .py tab to the server; stdout and stderr appear below."
-                        : "Run sends the active .js file as JavaScript; captured console output appears below."}
+                      {envMeta.runSupported
+                        ? environment === "python"
+                          ? "Run sends the active .py tab to the server; stdout and stderr appear below."
+                          : "Run sends the active .js file as JavaScript; captured console output appears below."
+                        : `Run is not available for ${envMeta.lang} yet.`}
                     </p>
                   )}
                   {runError ? (
@@ -885,6 +906,9 @@ export default function App() {
           <ChatPanel
             environment={environment}
             files={files}
+            targetFilesByEnv={Object.fromEntries(
+              WORKSPACE_ENVIRONMENT_IDS.map((id) => [id, dualWorkspace[id].files]),
+            )}
             currentFile={activePath}
             onAiEditProposal={handleAiEditProposal}
             diffPreviewOpen={!!aiEditPreview}
@@ -900,6 +924,7 @@ export default function App() {
           language={aiPreviewLanguage}
           colorTheme={colorTheme}
           toolAction={aiEditPreview.action}
+          workspaceLabel={aiEditPreview.workspaceLabel}
           onAccept={handleAcceptAiEditPreview}
           onReject={handleRejectAiEditPreview}
         />

@@ -1,9 +1,15 @@
-import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "./workspaceFilename.js";
+import {
+  WORKSPACE_ENVIRONMENT_IDS,
+  WORKSPACE_ENVIRONMENTS,
+  normalizeWorkspaceEnvironment,
+} from "@shared/workspaceEnvironments.js";
+import { isValidWorkspaceFilename } from "@shared/workspaceFilename.js";
+import { isValidJsWorkspaceFilename } from "./workspaceFilename.js";
 
 /** Legacy single-workspace key (v1); migrated into the JS slice on first load. */
 export const WORKSPACE_LOCAL_STORAGE_KEY = "llm:workspace:v1";
 
-/** Dual-environment workspace persistence. */
+/** Multi-environment workspace persistence (JS, Python, C#, …). */
 export const DUAL_WORKSPACE_STORAGE_KEY = "llm:dualWorkspace:v1";
 
 const DEFAULT_JS_FILES = {
@@ -25,30 +31,63 @@ print(greet("Monaco"))
 `,
 };
 
+const DEFAULT_CS_FILES = {
+  "main.cs": `// Welcome — edit freely
+using System;
+
+class Program
+{
+    static string Greet(string name) => $"Hello, {name}!";
+
+    static void Main()
+    {
+        Console.WriteLine(Greet("Monaco"));
+    }
+}
+`,
+};
+
+const DEFAULT_FILES_BY_ENV = {
+  js: DEFAULT_JS_FILES,
+  python: DEFAULT_PY_FILES,
+  csharp: DEFAULT_CS_FILES,
+};
+
 /**
- * @returns {{ environment: "js" | "python", js: { files: Record<string, string>, activePath: string | null }, python: { files: Record<string, string>, activePath: string | null } }}
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} kind
+ */
+function defaultSliceForEnv(kind) {
+  const files = { ...(DEFAULT_FILES_BY_ENV[kind] ?? { [`untitled${WORKSPACE_ENVIRONMENTS[kind]?.ext ?? ".txt"}`]: "" }) };
+  const keys = Object.keys(files).sort((a, b) => a.localeCompare(b));
+  return { files, activePath: keys[0] ?? null };
+}
+
+/**
+ * @returns {{ environment: import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId, js: { files: Record<string, string>, activePath: string | null }, python: { files: Record<string, string>, activePath: string | null }, csharp: { files: Record<string, string>, activePath: string | null } }}
  */
 export function getDefaultDualWorkspace() {
+  /** @type {Record<string, { files: Record<string, string>, activePath: string | null }>} */
+  const slices = {};
+  for (const id of WORKSPACE_ENVIRONMENT_IDS) {
+    slices[id] = defaultSliceForEnv(id);
+  }
   return {
     environment: "js",
-    js: { files: { ...DEFAULT_JS_FILES }, activePath: "main.js" },
-    python: { files: { ...DEFAULT_PY_FILES }, activePath: "main.py" },
+    ...slices,
   };
 }
 
 /**
  * @param {unknown} slice
- * @param {"js" | "python"} kind
- * @returns {{ files: Record<string, string>, activePath: string | null } | null}
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} kind
  */
 function normalizeWorkspaceSlice(slice, kind) {
   if (!slice || typeof slice !== "object" || Array.isArray(slice)) return null;
   const filesIn = slice.files;
   if (typeof filesIn !== "object" || filesIn === null || Array.isArray(filesIn)) return null;
-  const isValid = kind === "python" ? isValidPyWorkspaceFilename : isValidJsWorkspaceFilename;
   const files = {};
   for (const [k, v] of Object.entries(filesIn)) {
-    if (!isValid(k)) continue;
+    if (!isValidWorkspaceFilename(k, kind)) continue;
     if (typeof v !== "string") continue;
     files[k] = v;
   }
@@ -63,6 +102,28 @@ function normalizeWorkspaceSlice(slice, kind) {
 }
 
 /**
+ * @param {Record<string, unknown>} data
+ */
+function hydrateWorkspaceFromStorage(data) {
+  const environment = normalizeWorkspaceEnvironment(data.environment);
+  /** @type {Record<string, { files: Record<string, string>, activePath: string | null }>} */
+  const slices = {};
+  let anyMissing = false;
+
+  for (const id of WORKSPACE_ENVIRONMENT_IDS) {
+    const normalized = normalizeWorkspaceSlice(data[id], id);
+    if (normalized) {
+      slices[id] = normalized;
+    } else {
+      anyMissing = true;
+      slices[id] = defaultSliceForEnv(id);
+    }
+  }
+
+  return { environment, slices, migrated: anyMissing };
+}
+
+/**
  * @returns {ReturnType<typeof getDefaultDualWorkspace> | null}
  */
 export function loadPersistedDualWorkspace() {
@@ -72,13 +133,8 @@ export function loadPersistedDualWorkspace() {
     if (rawDual != null && rawDual !== "") {
       const data = JSON.parse(rawDual);
       if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-      const envRaw = data.environment;
-      const environment =
-        typeof envRaw === "string" && envRaw.trim().toLowerCase() === "python" ? "python" : "js";
-      const js = normalizeWorkspaceSlice(data.js, "js");
-      const py = normalizeWorkspaceSlice(data.python, "python");
-      if (!js || !py) return null;
-      return { environment, js, python: py };
+      const { environment, slices } = hydrateWorkspaceFromStorage(data);
+      return { environment, ...slices };
     }
 
     const rawLegacy = localStorage.getItem(WORKSPACE_LOCAL_STORAGE_KEY);
@@ -105,6 +161,7 @@ export function loadPersistedDualWorkspace() {
         environment: "js",
         js: { files, activePath: ap },
         python: def.python,
+        csharp: def.csharp,
       };
     }
   } catch {
@@ -119,14 +176,12 @@ export function loadPersistedDualWorkspace() {
 export function persistDualWorkspace(dual) {
   if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(
-      DUAL_WORKSPACE_STORAGE_KEY,
-      JSON.stringify({
-        environment: dual.environment,
-        js: dual.js,
-        python: dual.python,
-      }),
-    );
+    /** @type {Record<string, unknown>} */
+    const payload = { environment: dual.environment };
+    for (const id of WORKSPACE_ENVIRONMENT_IDS) {
+      payload[id] = dual[id];
+    }
+    localStorage.setItem(DUAL_WORKSPACE_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // Quota, private mode, or disabled storage
   }

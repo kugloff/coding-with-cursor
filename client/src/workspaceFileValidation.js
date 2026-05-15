@@ -1,9 +1,8 @@
+import { WORKSPACE_ENVIRONMENTS } from "@shared/workspaceEnvironments.js";
 import {
-  isValidJsWorkspaceFilename,
-  isValidPyWorkspaceFilename,
-  normalizedJsWorkspaceRenameFromDraft,
-  normalizedPyWorkspaceRenameFromDraft,
-} from "./workspaceFilename.js";
+  isValidWorkspaceFilename,
+  normalizedWorkspaceRenameFromDraft,
+} from "@shared/workspaceFilename.js";
 
 /**
  * @param {Record<string, string> | string[]} filesOrPaths
@@ -23,26 +22,15 @@ function pathSet(filesOrPaths) {
 }
 
 /**
- * @param {"js" | "python"} environment
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} environment
  */
-function isValidName(name, environment) {
-  return environment === "python" ? isValidPyWorkspaceFilename(name) : isValidJsWorkspaceFilename(name);
-}
-
-/**
- * @param {string} draft
- * @param {"js" | "python"} environment
- */
-function normalizedRenameFromDraft(draft, environment) {
-  return environment === "python"
-    ? normalizedPyWorkspaceRenameFromDraft(draft)
-    : normalizedJsWorkspaceRenameFromDraft(draft);
+function extForEnv(environment) {
+  return WORKSPACE_ENVIRONMENTS[environment]?.ext ?? ".txt";
 }
 
 /**
  * @param {unknown} name
- * @param {"js" | "python"} [environment]
- * @returns {{ ok: true, filename: string } | { ok: false, message: string }}
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  */
 export function validateWorkspaceFilename(name, environment = "js") {
   if (typeof name !== "string" || !name.trim()) {
@@ -55,8 +43,8 @@ export function validateWorkspaceFilename(name, environment = "js") {
   if (/[/\\]/.test(t)) {
     return { ok: false, message: 'Filename cannot contain "/" or "\\".' };
   }
-  if (!isValidName(t, environment)) {
-    const ext = environment === "python" ? ".py" : ".js";
+  if (!isValidWorkspaceFilename(t, environment)) {
+    const ext = extForEnv(environment);
     return {
       ok: false,
       message: `Workspace files must be a single name ending in "${ext}".`,
@@ -68,7 +56,7 @@ export function validateWorkspaceFilename(name, environment = "js") {
 /**
  * @param {unknown} name
  * @param {Record<string, string> | string[]} filesOrPaths
- * @param {"js" | "python"} [environment]
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  */
 export function validateWorkspaceCreate(name, filesOrPaths, environment = "js") {
   const base = validateWorkspaceFilename(name, environment);
@@ -82,7 +70,7 @@ export function validateWorkspaceCreate(name, filesOrPaths, environment = "js") 
 /**
  * @param {unknown} name
  * @param {Record<string, string>} files
- * @param {"js" | "python"} [environment]
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  */
 export function validateWorkspaceExistingPath(name, files, environment = "js") {
   const base = validateWorkspaceFilename(name, environment);
@@ -97,15 +85,15 @@ export function validateWorkspaceExistingPath(name, files, environment = "js") {
  * @param {unknown} draft
  * @param {Record<string, string> | string[]} filesOrPaths
  * @param {string} oldPath
- * @param {"js" | "python"} [environment]
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  */
 export function validateWorkspaceRename(draft, filesOrPaths, oldPath, environment = "js") {
   const set = pathSet(filesOrPaths);
   if (typeof oldPath !== "string" || !oldPath.trim() || !set.has(oldPath)) {
     return { ok: false, message: "Original file is not in the workspace." };
   }
-  const next = normalizedRenameFromDraft(typeof draft === "string" ? draft : "", environment);
-  const ext = environment === "python" ? ".py" : ".js";
+  const next = normalizedWorkspaceRenameFromDraft(typeof draft === "string" ? draft : "", environment);
+  const ext = extForEnv(environment);
   if (!next) {
     return {
       ok: false,
@@ -123,7 +111,7 @@ export function validateWorkspaceRename(draft, filesOrPaths, oldPath, environmen
  * @param {string} oldPath
  * @param {unknown} newResolvedName
  * @param {Record<string, string>} files
- * @param {"js" | "python"} [environment]
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  */
 export function validateWorkspaceRenameTarget(oldPath, newResolvedName, files, environment = "js") {
   const set = pathSet(files);
@@ -143,7 +131,7 @@ export function validateWorkspaceRenameTarget(oldPath, newResolvedName, files, e
  * @param {unknown} filename
  * @param {Record<string, string>} files
  * @param {"create_file" | "edit_file"} action
- * @param {"js" | "python"} [environment]
+ * @param {import("@shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  */
 export function validateWorkspaceAiFileTarget(filename, files, action, environment = "js") {
   if (action === "create_file") {

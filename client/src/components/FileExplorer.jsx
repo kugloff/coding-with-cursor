@@ -10,7 +10,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { workspaceJsBasenameForRename, workspacePyBasenameForRename } from "../workspaceFilename.js";
+import { WORKSPACE_ENVIRONMENTS } from "@shared/workspaceEnvironments.js";
+import { workspaceBasenameForRename } from "../workspaceFilename.js";
 import { validateWorkspaceRename } from "../workspaceFileValidation.js";
 
 function FileGlyph() {
@@ -80,9 +81,7 @@ export default function FileExplorer({
 
   function beginRename(path) {
     setRenamingPath(path);
-    setRenameDraft(
-      environment === "python" ? workspacePyBasenameForRename(path) : workspaceJsBasenameForRename(path),
-    );
+    setRenameDraft(workspaceBasenameForRename(path, environment));
   }
 
   function cancelRename() {
@@ -196,8 +195,8 @@ export default function FileExplorer({
         </button>
       </div>
       <p className="file-explorer__note">
-        Tabs persist in this browser (localStorage) — JavaScript and Python workspaces are stored separately. Reset clears
-        both.
+        Tabs persist in this browser (localStorage) — each language workspace is stored separately. Reset restores all
+        defaults.
       </p>
       <ul ref={listRef} className="file-explorer__list" aria-label="Files">
         {paths.length === 0 ? (
@@ -206,7 +205,7 @@ export default function FileExplorer({
           paths.map((path) => {
             const isActive = path === activePath;
             const isRenaming = renamingPath === path;
-            const renameSuffix = environment === "python" ? ".py" : ".js";
+            const renameSuffix = WORKSPACE_ENVIRONMENTS[environment]?.ext ?? ".txt";
 
             if (isRenaming) {
               return (

@@ -3,7 +3,8 @@
  * (`edit_file` or `create_file` with `filename` + `content`).
  */
 
-import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "./workspaceFilename.js";
+import { isValidWorkspaceFilename } from "../shared/workspaceFilename.js";
+import { WORKSPACE_ENVIRONMENTS } from "../shared/workspaceEnvironments.js";
 
 /**
  * Strip a single leading/trailing markdown ``` fence if present.
@@ -44,10 +45,10 @@ function isFileTool(obj, action) {
 }
 
 /**
- * @param {"js" | "python"} environment
+ * @param {import("../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} environment
  */
 function isValidToolWorkspaceName(name, environment) {
-  return environment === "python" ? isValidPyWorkspaceFilename(name) : isValidJsWorkspaceFilename(name);
+  return isValidWorkspaceFilename(name, environment);
 }
 
 /**
@@ -67,8 +68,9 @@ export function parseAssistantModelOutput(raw, environment = "js") {
     return { response: trimmed, toolCall: null };
   }
 
-  const ext = environment === "python" ? ".py" : ".js";
-  const lang = environment === "python" ? "Python" : "JavaScript";
+  const meta = WORKSPACE_ENVIRONMENTS[environment] ?? WORKSPACE_ENVIRONMENTS.js;
+  const ext = meta.ext;
+  const lang = meta.lang;
 
   try {
     const obj = JSON.parse(candidate);

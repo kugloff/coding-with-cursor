@@ -193,6 +193,38 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/App.jsx`**: removed **gist strip** bar under editor header (duplicate of **Copy snippet**); gist copy remains in explorer + header.
 - **`client/src/workspaceSnippet.js`**: removed unused **`gistSnippetPreviewLine`**.
 
+### 2026-05-15 — C# format with CSharpier
+
+- **`server/formatCsharp.js`** (new): **`formatCsharpWithCSharpier`** — writes temp **`snippet.cs`**, runs **`csharpier format <path>`** (in-place; avoids Windows stdin-path bugs); tries **`csharpier`**, **`dotnet csharpier`**, **`dotnet tool run csharpier`**; **`CSHARPIER_BIN`**, **`FORMAT_CSHARP_TIMEOUT_MS`** env.
+- **`server/index.js`**: **`POST /format`** routes **`environment: "csharp"`** to CSharpier.
+- **`shared/workspaceEnvironments.js`**: **`csharp.formatSupported: true`**.
+- **`client/src/App.jsx`**: Format tooltip + toast for CSharpier.
+- **`server/.env.example`**, **`README.md`**: install and troubleshooting.
+
+### 2026-05-15 — C# workspace (editor + AI; no Run/Format)
+
+- **`shared/workspaceEnvironments.js`**: **`csharp`** entry (`*.cs`, Monaco **csharp**, **`runSupported`** / **`formatSupported`** false).
+- **`shared/workspaceFilename.js`** (new): generic **`isValidWorkspaceFilename`**, rename helpers.
+- **`client/src/workspaceStorage.js`**: default **`main.cs`**; load migrates missing **csharp** slice; persistence includes all **`WORKSPACE_ENVIRONMENT_IDS`**.
+- **`client` / `server` `workspaceFilename.js`**, **`workspaceFileValidation.js`**: registry-driven validation; **C#** path rules.
+- **`client/src/App.jsx`**: top bar lists all languages from registry; Run/Format disabled per flags; export ZIP includes **csharp/**.
+- **`client/src/exportWorkspaceZip.js`**, **`workspaceSnippet.js`**, **`FileExplorer.jsx`**, **`ChatPanel.jsx`**: C#-aware.
+- **`server/index.js`**: **POST /run** and **POST /format** reject environments with **`runSupported`** / **`formatSupported`** false.
+- **`README.md`**: multi-language overview, §4.1 C#, layout **shared/**.
+
+### 2026-05-15 — Translate chat mode (cross-environment)
+
+- **`shared/workspaceEnvironments.js`** (new): **`WORKSPACE_ENVIRONMENTS`** registry, **`getTranslationTargets`**, **`resolveTranslationTarget`**, **`buildConvertedFilename`** (`_converted` suffix + collision suffix). Add languages here to extend the app.
+- **`server/chatBody.js`**: **`normalizeChatMode`** includes **`translate`**; **`resolveTranslationTarget`** re-export.
+- **`server/services/geminiService.js`**: translate prompts and tool validation against **`targetEnvironment`**; **`expectedFilename`** enforced on tool payload.
+- **`server/index.js`**: **`POST /chat`** accepts **`targetEnvironment`**, **`targetFiles`**, **`expectedFilename`**; translate allows empty **`message`**.
+- **`client/vite.config.js`**: **`@shared`** alias → **`../shared`**.
+- **`client/src/components/ChatPanel.jsx`**: **Translate** mode + **To** language switch (only non-source languages); sends translate fields; cross-env diff proposal.
+- **`client/src/App.jsx`**: **`applyAiFileEdit`** / **`handleAiEditProposal`** accept **`targetEnvironment`** + **`switchToTarget`** on accept.
+- **`client/src/components/AiEditPreviewModal.jsx`**: optional **`workspaceLabel`** in header.
+- **`client/src/App.css`**: translate target switch styles.
+- **`README.md`**: §1 overview, §4.3, §5.2, layout table.
+
 ### 2026-05-15 — New file: empty starter
 
 - **`client/src/App.jsx`**: **`handleCreateFile`** uses **`""`** instead of **`// New file`** / **`# New file`** comment lines.

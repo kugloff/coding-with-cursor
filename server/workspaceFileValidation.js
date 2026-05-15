@@ -1,9 +1,10 @@
-import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "./workspaceFilename.js";
+import { WORKSPACE_ENVIRONMENTS } from "../shared/workspaceEnvironments.js";
+import { isValidWorkspaceFilename } from "../shared/workspaceFilename.js";
 
 /**
  * Human-readable reason if a chat `files` key is not allowed, or `null` if OK.
  * @param {string} key
- * @param {"js" | "python"} [environment]
+ * @param {import("../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  * @returns {string | null}
  */
 export function workspaceChatFileKeyErrorDetail(key, environment = "js") {
@@ -13,9 +14,8 @@ export function workspaceChatFileKeyErrorDetail(key, environment = "js") {
   if (key.length > 1024) {
     return "A file path exceeds the maximum length (1024 characters).";
   }
-  const ok = environment === "python" ? isValidPyWorkspaceFilename(key) : isValidJsWorkspaceFilename(key);
-  if (!ok) {
-    const ext = environment === "python" ? ".py" : ".js";
+  if (!isValidWorkspaceFilename(key, environment)) {
+    const ext = WORKSPACE_ENVIRONMENTS[environment]?.ext ?? ".txt";
     return `Workspace paths must be a single filename ending in "${ext}". Invalid key: "${key.slice(0, 80)}${key.length > 80 ? "…" : ""}".`;
   }
   return null;

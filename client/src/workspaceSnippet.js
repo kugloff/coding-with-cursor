@@ -1,9 +1,12 @@
+import { WORKSPACE_ENVIRONMENTS } from "@shared/workspaceEnvironments.js";
+
 /** @param {string} filename */
 export function markdownLangForWorkspaceFile(filename) {
   if (!filename) return "";
   const lower = filename.toLowerCase();
-  if (lower.endsWith(".py")) return "python";
-  if (lower.endsWith(".js")) return "javascript";
+  for (const meta of Object.values(WORKSPACE_ENVIRONMENTS)) {
+    if (lower.endsWith(meta.ext.toLowerCase())) return meta.gistLang;
+  }
   if (lower.endsWith(".ts")) return "typescript";
   if (lower.endsWith(".json")) return "json";
   if (lower.endsWith(".md")) return "markdown";
@@ -21,4 +24,3 @@ export function formatGistSnippet(filename, content) {
   const fence = lang ? `\`\`\`${lang}` : "```";
   return `### ${filename}\n\n${fence}\n${body}\n\`\`\``;
 }
-

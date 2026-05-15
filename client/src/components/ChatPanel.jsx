@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, ArrowUp, Sparkles, User } from "lucide-react";
-import { isValidJsWorkspaceFilename, isValidPyWorkspaceFilename } from "../workspaceFilename.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, ArrowUp, Languages, Sparkles, User } from "lucide-react";
+import {
+  buildConvertedFilename,
+  getTranslationTargets,
+  WORKSPACE_ENVIRONMENTS,
+} from "@shared/workspaceEnvironments.js";
+import { isValidWorkspaceFilename } from "@shared/workspaceFilename.js";
+
+function validToolNameChecker(envId) {
+  return (name) => isValidWorkspaceFilename(name, envId);
+}
 
 export default function ChatPanel({
   environment = "js",
   files = {},
+  targetFilesByEnv = {},
   currentFile = null,
   onAiEditProposal,
   diffPreviewOpen = false,
@@ -12,10 +22,20 @@ export default function ChatPanel({
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState("chat");
+  const [translateTarget, setTranslateTarget] = useState(() => getTranslationTargets(environment)[0]?.id ?? "python");
   const [pending, setPending] = useState(false);
   const [lastModelInfo, setLastModelInfo] = useState(null);
   const listRef = useRef(null);
   const messageIdRef = useRef(0);
+
+  const translationTargets = useMemo(() => getTranslationTargets(environment), [environment]);
+
+  useEffect(() => {
+    const allowed = translationTargets.map((t) => t.id);
+    if (allowed.length && !allowed.includes(translateTarget)) {
+      setTranslateTarget(allowed[0]);
+    }
+  }, [translationTargets, translateTarget]);
 
   useEffect(() => {
     setMessages([]);
@@ -35,22 +55,44 @@ export default function ChatPanel({
     el.scrollTop = el.scrollHeight;
   }, [messages, pending]);
 
+  const canTranslate = Boolean(currentFile && typeof files[currentFile] === "string");
+
   async function handleSend(e) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || pending || diffPreviewOpen) return;
+    const isTranslate = chatMode === "translate";
+    if ((!text && !isTranslate) || pending || diffPreviewOpen) return;
+    if (isTranslate && !canTranslate) return;
 
     setInput("");
-    appendMessage("user", text);
+    const displayText =
+      text ||
+      (isTranslate
+        ? `Translate \`${currentFile}\` to ${WORKSPACE_ENVIRONMENTS[translateTarget]?.lang ?? translateTarget}`
+        : "");
+    appendMessage("user", displayText);
     setPending(true);
 
     try {
+      const targetFiles = targetFilesByEnv[translateTarget] ?? {};
+      const expectedFilename =
+        isTranslate && currentFile
+          ? buildConvertedFilename(currentFile, environment, translateTarget, targetFiles)
+          : undefined;
+
       const payload = {
-        message: text,
+        message: text || (isTranslate ? displayText : ""),
         files,
         currentFile: currentFile ?? null,
         mode: chatMode,
         environment,
+        ...(isTranslate
+          ? {
+              targetEnvironment: translateTarget,
+              expectedFilename,
+              targetFiles,
+            }
+          : {}),
       };
 
       const res = await fetch("/chat", {
@@ -79,13 +121,24 @@ export default function ChatPanel({
         throw new Error("Invalid response from server (response must be a string)");
       }
 
-      const serverMode = data.mode === "agent" ? "agent" : "chat";
+      const serverMode =
+        data.mode === "translate" ? "translate" : data.mode === "agent" ? "agent" : "chat";
       const serverEnvironment = data.environment === "python" ? "python" : "js";
-      const allowStructuredTools = serverMode === "agent" && serverEnvironment === environment;
+      const serverTarget =
+        data.targetEnvironment === "python" ? "python" : data.targetEnvironment === "js" ? "js" : null;
+
+      const allowAgentTools = serverMode === "agent" && serverEnvironment === environment;
+      const allowTranslateTools =
+        serverMode === "translate" &&
+        serverEnvironment === environment &&
+        serverTarget === translateTarget &&
+        serverTarget !== environment;
+
+      const allowStructuredTools = allowAgentTools || allowTranslateTools;
+      const toolEnv = allowTranslateTools ? serverTarget : environment;
+      const validToolName = validToolNameChecker(toolEnv);
 
       const tool = data.toolCall;
-      const validToolName =
-        environment === "python" ? isValidPyWorkspaceFilename : isValidJsWorkspaceFilename;
 
       const isEditTool =
         tool &&
@@ -104,24 +157,32 @@ export default function ChatPanel({
         typeof tool.content === "string";
 
       const isFileProposal = isEditTool || isCreateTool;
-      const isAgentFileProposal = allowStructuredTools && isFileProposal;
+      const isStructuredProposal = allowStructuredTools && isFileProposal;
 
-      if (isAgentFileProposal) {
-        onAiEditProposal?.(tool);
+      if (isStructuredProposal) {
+        onAiEditProposal?.(tool, {
+          targetEnvironment: toolEnv,
+          switchToTarget: allowTranslateTools,
+        });
       }
 
       const textPart = data.response.trim();
-
       let assistantBody = textPart;
+      const targetLang = WORKSPACE_ENVIRONMENTS[toolEnv]?.lang ?? toolEnv;
 
-      if (isCreateTool && isAgentFileProposal) {
+      if (isCreateTool && isStructuredProposal) {
         const name = tool.filename.trim();
-        const prefix = `Proposed new file \`${name}\` — open the diff dialog (empty original if the file is new), then Accept or Reject.`;
-        assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
-      } else if (isEditTool && isAgentFileProposal) {
+        const dest =
+          allowTranslateTools
+            ? ` in the **${targetLang}** workspace`
+            : "";
+        const prefix = `Proposed new file \`${name}\`${dest} — open the diff dialog (empty original if the file is new), then Accept or Reject.`;
+        assistantBody = textPart ? `${prefix}\n\n${textPart}` : prefix;
+      } else if (isEditTool && isStructuredProposal) {
         const edited = tool.filename.trim();
-        const prefix = `Proposed changes for \`${edited}\` — open the diff dialog to compare original vs new code, then choose Accept or Reject.`;
-        assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
+        const dest = allowTranslateTools ? ` (${targetLang} workspace)` : "";
+        const prefix = `Proposed changes for \`${edited}\`${dest} — open the diff dialog to compare original vs new code, then choose Accept or Reject.`;
+        assistantBody = textPart ? `${prefix}\n\n${textPart}` : prefix;
       } else if (!assistantBody) {
         throw new Error("Invalid response from server (empty reply)");
       }
@@ -146,11 +207,16 @@ export default function ChatPanel({
     }
   }
 
+  const modeCaption =
+    chatMode === "agent" ? "Agent mode" : chatMode === "translate" ? "Translate mode" : "Chat mode";
+
+  const sourceLang = WORKSPACE_ENVIRONMENTS[environment]?.lang ?? environment;
+
   return (
     <div className="chat-panel">
       <div className="chat-panel__header">
         <span className="chat-panel__mode-caption" id="chat-mode-caption">
-          {chatMode === "agent" ? "Agent mode" : "Chat mode"}
+          {modeCaption}
         </span>
         <div
           className="chat-panel__mode-toggle"
@@ -175,38 +241,74 @@ export default function ChatPanel({
           >
             Agent
           </button>
+          <button
+            type="button"
+            className={`chat-panel__mode-btn${chatMode === "translate" ? " chat-panel__mode-btn--active" : ""}`}
+            onClick={() => setChatMode("translate")}
+            disabled={pending || diffPreviewOpen}
+            aria-pressed={chatMode === "translate"}
+          >
+            Translate
+          </button>
         </div>
+        {chatMode === "translate" && translationTargets.length > 0 ? (
+          <div
+            className="chat-panel__translate-target"
+            role="group"
+            aria-label="Translate to language"
+          >
+            <span className="chat-panel__translate-label">To</span>
+            {translationTargets.map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                className={`chat-panel__translate-btn${
+                  translateTarget === target.id ? " chat-panel__translate-btn--active" : ""
+                }`}
+                onClick={() => setTranslateTarget(target.id)}
+                disabled={pending || diffPreviewOpen || target.id === environment}
+                aria-pressed={translateTarget === target.id}
+                title={`Translate ${sourceLang} to ${target.lang}`}
+              >
+                {target.lang}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="chat-panel__thread" ref={listRef} role="log" aria-live="polite">
         {messages.length === 0 && !pending && (
           <p className="chat-panel__empty">
             {chatMode === "chat" ? (
               <>
-                <strong>Chat mode</strong> — the assistant answers in natural language only; it does not apply file edits
-                or return structured tool JSON. You can discuss the current{" "}
-                {environment === "python" ? (
-                  <>
-                    Python workspace (every tab is a <code>.py</code> file)
-                  </>
-                ) : (
-                  <>
-                    JavaScript workspace (every tab is a <code>.js</code> file)
-                  </>
-                )}
+                <strong>Chat mode</strong> — the assistant answers in natural language only; it does not apply file
+                edits or return structured tool JSON. You can discuss the current{" "}
+                {WORKSPACE_ENVIRONMENTS[environment]?.lang ?? environment} workspace (every tab is a{" "}
+                <code>{WORKSPACE_ENVIRONMENTS[environment]?.ext ?? ""}</code> file)
                 . Each request sends the <strong>project file list</strong>, the <strong>active file name</strong>, and{" "}
                 <strong>full file contents</strong> (within server limits). Set <code>GEMINI_API_KEY</code> in{" "}
                 <code>server/.env</code>.
               </>
+            ) : chatMode === "translate" ? (
+              <>
+                <strong>Translate mode</strong> — ports the <strong>active file</strong> from {sourceLang} to another
+                workspace language using AI. Choose the target with the <strong>To</strong> switch (only languages other
+                than {sourceLang} are shown). The result is saved as{" "}
+                <code>
+                  name{WORKSPACE_ENVIRONMENTS[translateTarget]?.ext ?? ""}
+                </code>{" "}
+                with a <code>_converted</code> suffix (e.g. <code>main.js</code> →{" "}
+                <code>main_converted.py</code>). A diff opens first; Accept writes to the{" "}
+                <strong>{WORKSPACE_ENVIRONMENTS[translateTarget]?.lang ?? "target"}</strong> workspace and switches
+                there. Ports are best-effort — review and run in the target environment.
+              </>
             ) : (
               <>
                 <strong>Agent mode</strong> — the model returns only <code>edit_file</code> / <code>create_file</code>{" "}
-                JSON for valid {environment === "python" ? (
-                  <code>.py</code>
-                ) : (
-                  <code>.js</code>
-                )}{" "}
-                names in this environment only; a side-by-side diff opens first and nothing is saved until you accept.
-                Describe the change you want in plain language; the reply will not include conversational prose.
+                JSON for valid{" "}
+                <code>{WORKSPACE_ENVIRONMENTS[environment]?.ext ?? ""}</code> names in this environment only; a
+                side-by-side diff opens first and nothing is saved until you accept. Describe the change you want in
+                plain language; the reply will not include conversational prose.
               </>
             )}
           </p>
@@ -219,7 +321,13 @@ export default function ChatPanel({
           >
             <div className="chat-msg__avatar" aria-hidden>
               {msg.role === "user" && <User size={13} strokeWidth={2} />}
-              {msg.role === "assistant" && <Sparkles size={13} strokeWidth={2} />}
+              {msg.role === "assistant" && (
+                chatMode === "translate" ? (
+                  <Languages size={13} strokeWidth={2} />
+                ) : (
+                  <Sparkles size={13} strokeWidth={2} />
+                )
+              )}
               {msg.role === "error" && <AlertCircle size={13} strokeWidth={2} />}
             </div>
             <div className="chat-msg__body">
@@ -235,12 +343,16 @@ export default function ChatPanel({
         {pending && (
           <div className="chat-msg chat-msg--assistant" aria-busy="true">
             <div className="chat-msg__avatar" aria-hidden>
-              <Sparkles size={13} strokeWidth={2} />
+              {chatMode === "translate" ? (
+                <Languages size={13} strokeWidth={2} />
+              ) : (
+                <Sparkles size={13} strokeWidth={2} />
+              )}
             </div>
             <div className="chat-msg__body">
               <div className="chat-msg__label">AI</div>
               <div className="chat-msg__bubble chat-msg__bubble--typing">
-                <span>Thinking</span>
+                <span>{chatMode === "translate" ? "Translating" : "Thinking"}</span>
                 <span className="chat-typing-dots" aria-hidden>
                   <span />
                   <span />
@@ -298,7 +410,9 @@ export default function ChatPanel({
         <label className="visually-hidden" htmlFor="chat-input">
           {chatMode === "agent"
             ? "Edit request: describe the change you want. Enter sends; Shift+Enter adds a newline."
-            : "Message: Enter sends; Shift+Enter adds a newline."}
+            : chatMode === "translate"
+              ? "Translate request. Enter sends; Shift+Enter adds a newline."
+              : "Message: Enter sends; Shift+Enter adds a newline."}
         </label>
         <div className="chat-panel__composer-inner">
           <textarea
@@ -308,7 +422,11 @@ export default function ChatPanel({
             placeholder={
               chatMode === "agent"
                 ? "Describe edit — Enter · Shift+Enter newline"
-                : "Ask AI — Enter to send · Shift+Enter newline"
+                : chatMode === "translate"
+                  ? canTranslate
+                    ? `Translate ${currentFile} — Enter · Shift+Enter newline`
+                    : "Select a file to translate"
+                  : "Ask AI — Enter to send · Shift+Enter newline"
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -318,13 +436,13 @@ export default function ChatPanel({
                 handleSend(e);
               }
             }}
-            disabled={pending || diffPreviewOpen}
+            disabled={pending || diffPreviewOpen || (chatMode === "translate" && !canTranslate)}
           />
           <button
             type="submit"
             className="chat-panel__send"
-            disabled={pending || diffPreviewOpen || !input.trim()}
-            aria-label="Send message"
+            disabled={pending || diffPreviewOpen || (chatMode === "translate" ? !canTranslate : !input.trim())}
+            aria-label={chatMode === "translate" ? "Translate file" : "Send message"}
           >
             <ArrowUp size={17} strokeWidth={2.5} />
           </button>

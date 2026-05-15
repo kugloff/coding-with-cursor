@@ -1,13 +1,19 @@
+import {
+  normalizeWorkspaceEnvironment,
+  resolveTranslationTarget,
+} from "../shared/workspaceEnvironments.js";
 import { workspaceChatFileKeyErrorDetail } from "./workspaceFileValidation.js";
 
 /**
  * @param {unknown} mode
- * @returns {"chat" | "agent"}
+ * @returns {"chat" | "agent" | "translate"}
  */
 export function normalizeChatMode(mode) {
   if (typeof mode !== "string") return "chat";
   const t = mode.trim().toLowerCase();
-  return t === "agent" ? "agent" : "chat";
+  if (t === "agent") return "agent";
+  if (t === "translate") return "translate";
+  return "chat";
 }
 
 /**
@@ -15,10 +21,10 @@ export function normalizeChatMode(mode) {
  * @returns {"js" | "python"}
  */
 export function normalizeChatEnvironment(raw) {
-  if (typeof raw !== "string") return "js";
-  const t = raw.trim().toLowerCase();
-  return t === "python" ? "python" : "js";
+  return normalizeWorkspaceEnvironment(raw);
 }
+
+export { resolveTranslationTarget };
 
 /**
  * Validates optional `files` and `currentFile` from POST /chat JSON body.

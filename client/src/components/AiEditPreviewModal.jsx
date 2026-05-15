@@ -20,6 +20,7 @@ export default function AiEditPreviewModal({
   language = "plaintext",
   colorTheme = "dark",
   toolAction = "edit_file",
+  workspaceLabel = null,
   onAccept,
   onReject,
 }) {
@@ -52,6 +53,9 @@ export default function AiEditPreviewModal({
           </h2>
           <p className="ai-edit-preview__path" title={filename}>
             <span className="ai-edit-preview__path-label">{pathLabel}</span> {filename}
+            {workspaceLabel ? (
+              <span className="ai-edit-preview__workspace"> · {workspaceLabel} workspace</span>
+            ) : null}
           </p>
         </header>
         <div className="ai-edit-preview__diff-wrap">
