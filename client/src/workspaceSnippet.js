@@ -22,9 +22,3 @@ export function formatGistSnippet(filename, content) {
   return `### ${filename}\n\n${fence}\n${body}\n\`\`\``;
 }
 
-/** One-line preview for the editor snippet strip. */
-export function gistSnippetPreviewLine(filename) {
-  const lang = markdownLangForWorkspaceFile(filename);
-  if (!lang) return `\`\`\`  ${filename}`;
-  return `\`\`\`${lang}  ${filename}`;
-}

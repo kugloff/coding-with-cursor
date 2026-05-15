@@ -717,68 +717,6 @@
   cursor: not-allowed;
 }
 
-.editor-snippet-strip {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-shrink: 0;
-  padding: 0.28rem 0.55rem;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-inset);
-  min-height: 28px;
-}
-
-.editor-snippet-strip__label {
-  flex-shrink: 0;
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
-.editor-snippet-strip__preview {
-  flex: 1;
-  min-width: 0;
-  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.editor-snippet-strip__copy {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.22rem;
-  padding: 0.18rem 0.42rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  font: inherit;
-  font-size: 0.625rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  transition:
-    border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.editor-snippet-strip__copy:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  color: var(--text-primary);
-  background: var(--accent-soft);
-}
-
-.editor-snippet-strip__copy:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .editor-column {
   flex: 1;
   display: flex;

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   ClipboardCopy,
+  Copy,
   FileCode,
   PencilLine,
   Plus,
@@ -18,7 +19,7 @@ function FileGlyph() {
 }
 
 const CONTEXT_MENU_W = 168;
-const CONTEXT_MENU_H = 132;
+const CONTEXT_MENU_H = 176;
 
 export default function FileExplorer({
   environment = "js",
@@ -28,6 +29,7 @@ export default function FileExplorer({
   onCreate,
   onDeleteFile,
   onRenameFile,
+  onCopyRaw,
   onCopySnippet,
 }) {
   const [renamingPath, setRenamingPath] = useState(null);
@@ -132,6 +134,18 @@ export default function FileExplorer({
           aria-label="File actions"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
+          <button
+            type="button"
+            className="file-explorer__context-item"
+            role="menuitem"
+            onClick={() => {
+              onCopyRaw?.(contextMenu.path);
+              closeContextMenu();
+            }}
+          >
+            <Copy size={14} strokeWidth={2} aria-hidden />
+            Copy raw file
+          </button>
           <button
             type="button"
             className="file-explorer__context-item"
@@ -247,18 +261,6 @@ export default function FileExplorer({
                     <span className="file-explorer__file-name">{path}</span>
                   </button>
                   <div className="file-explorer__actions">
-                    <button
-                      type="button"
-                      className="file-explorer__icon-btn"
-                      aria-label={`Copy gist snippet for ${path}`}
-                      title="Copy gist snippet"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCopySnippet?.(path);
-                      }}
-                    >
-                      <ClipboardCopy size={14} strokeWidth={2} />
-                    </button>
                     <button
                       type="button"
                       className="file-explorer__icon-btn"

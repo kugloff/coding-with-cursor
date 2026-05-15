@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardCopy,
+  Copy,
   LayoutPanelLeft,
   MessageSquare,
   PanelsTopLeft,
@@ -17,7 +18,7 @@ import {
 import { copyTextToClipboard } from "./copyToClipboard.js";
 import { formatJavaScript } from "./formatJavaScript.js";
 import { downloadDualWorkspaceZip } from "./exportWorkspaceZip.js";
-import { formatGistSnippet, gistSnippetPreviewLine } from "./workspaceSnippet.js";
+import { formatGistSnippet } from "./workspaceSnippet.js";
 import { applyTheme, loadTheme, persistTheme } from "./theme.js";
 import "./App.css";
 import FileExplorer from "./components/FileExplorer.jsx";
@@ -399,11 +400,10 @@ export default function App() {
     setDualWorkspace((dw) => {
       const cur = dw[dw.environment];
       const name = nextUntitledName(cur.files, dw.environment);
-      const starter = dw.environment === "python" ? "# New file\n" : "// New file\n";
       return {
         ...dw,
         [dw.environment]: {
-          files: { ...cur.files, [name]: starter },
+          files: { ...cur.files, [name]: "" },
           activePath: name,
         },
       };
@@ -534,10 +534,18 @@ export default function App() {
     return editorLanguageForWorkspacePath(aiEditPreview.filename);
   }, [aiEditPreview, environment]);
 
-  const snippetPreview = useMemo(() => {
-    if (!activePath) return "Open a file to copy a gist-style Markdown snippet";
-    return gistSnippetPreviewLine(activePath);
-  }, [activePath]);
+  const handleCopyRawFile = useCallback(
+    async (path) => {
+      const p = path ?? activePath;
+      if (!p || typeof files[p] !== "string") {
+        showToast("No file to copy");
+        return;
+      }
+      const ok = await copyTextToClipboard(files[p]);
+      showToast(ok ? `Copied code: ${p}` : "Could not copy to clipboard");
+    },
+    [activePath, files, showToast],
+  );
 
   const handleCopySnippet = useCallback(
     async (path) => {
@@ -701,6 +709,7 @@ export default function App() {
             onCreate={handleCreateFile}
             onDeleteFile={handleDeleteFile}
             onRenameFile={handleRenameFile}
+            onCopyRaw={handleCopyRawFile}
             onCopySnippet={handleCopySnippet}
           />
         </aside>
@@ -718,6 +727,16 @@ export default function App() {
               <span className="pane-header__pill pane-header__pill--muted" title="Active workspace environment">
                 {environment === "python" ? "Python" : "JS"}
               </span>
+              <button
+                type="button"
+                className="editor-toolbar-btn"
+                onClick={() => handleCopyRawFile()}
+                disabled={!activePath}
+                title={activePath ? "Copy active file source to clipboard" : "Open a file to copy"}
+              >
+                <Copy size={14} strokeWidth={2} aria-hidden />
+                Copy code
+              </button>
               <button
                 type="button"
                 className="editor-toolbar-btn"
@@ -769,20 +788,6 @@ export default function App() {
                 {runPending ? "Running…" : "Run"}
               </button>
             </div>
-          </div>
-          <div className="editor-snippet-strip" aria-label="Gist snippet preview">
-            <span className="editor-snippet-strip__label">Gist</span>
-            <code className="editor-snippet-strip__preview">{snippetPreview}</code>
-            <button
-              type="button"
-              className="editor-snippet-strip__copy"
-              onClick={() => handleCopySnippet()}
-              disabled={!activePath}
-              title="Copy Markdown gist block to clipboard"
-            >
-              <ClipboardCopy size={13} strokeWidth={2} aria-hidden />
-              Copy
-            </button>
           </div>
           <div className="editor-column">
             <CodeEditor

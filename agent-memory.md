@@ -143,7 +143,7 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/copyToClipboard.js`** (new): **`copyTextToClipboard`** (`navigator.clipboard` + textarea fallback).
 - **`client/src/exportWorkspaceZip.js`** (new): **`downloadDualWorkspaceZip`** — zip folders **`javascript/`**, **`python/`**, **`README.txt`**; filename **`llm-workspace-YYYYMMDD-HHMM.zip`**.
 - **`client/src/App.jsx`**: top bar **Export ZIP**; editor **Copy snippet** + **gist strip** above Monaco; **`handleCopySnippet`** / **`handleExportZip`**; toast state renamed **`toastMessage`** / **`showToast`** (AI apply + copy/export feedback).
-- **`client/src/components/FileExplorer.jsx`**: per-row copy icon; context menu **Copy gist snippet**; **`onCopySnippet`** prop.
+- **`client/src/components/FileExplorer.jsx`**: context menu **Copy gist snippet**; **`onCopySnippet`** prop (per-row icons removed later).
 - **`client/src/App.css`**: **`.workspace__share-btn`**, **`.editor-toolbar-btn`**, **`.editor-snippet-strip`**, **`.workspace-toast`** (shared with **`.ai-toast`** styles).
 - **`README.md`**: §4 overview + §4.2 export/snippet UX; layout table entries for new modules.
 
@@ -181,3 +181,25 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/App.jsx`**: **`runMeta`**, **`runErrorLabel`**; Output header **Running…** / **Completed in N ms** / **Timed out at N ms**; error tag + kind line in body.
 - **`client/src/App.css`**: **`.run-output__status`**, **`.run-output__error-tag`**, **`.run-output__error-kind`**.
 - **`README.md`**: overview, §4.2, §5.1 / §5.4, layout, troubleshooting.
+
+### 2026-05-15 — Copy raw file (per-file)
+
+- **`client/src/App.jsx`**: **`handleCopyRawFile`** — copies file body only via **`copyTextToClipboard`**; editor **Copy code** button; **`onCopyRaw`** passed to explorer.
+- **`client/src/components/FileExplorer.jsx`**: context menu **Copy raw file** (before gist snippet); **`onCopyRaw`** prop (per-row icons removed later).
+- **`README.md`**: §4 overview + §4.2 distinguish **Copy code** vs **Copy snippet**.
+
+### 2026-05-15 — Remove editor gist strip
+
+- **`client/src/App.jsx`**: removed **gist strip** bar under editor header (duplicate of **Copy snippet**); gist copy remains in explorer + header.
+- **`client/src/workspaceSnippet.js`**: removed unused **`gistSnippetPreviewLine`**.
+
+### 2026-05-15 — New file: empty starter
+
+- **`client/src/App.jsx`**: **`handleCreateFile`** uses **`""`** instead of **`// New file`** / **`# New file`** comment lines.
+
+### 2026-05-15 — Explorer: row icons (rename/delete only)
+
+- **`client/src/components/FileExplorer.jsx`**: per-row icons are **rename** and **delete** only; copy raw / copy gist removed from rows (context menu + editor header).
+- **`README.md`**: copy via context menu / header; rename/delete on row + context menu.
+- **`client/src/App.css`**: removed **`.editor-snippet-strip`** styles.
+- **`README.md`**: dropped gist strip from §4.2 and layout table.

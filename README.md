@@ -40,7 +40,7 @@ Browser-based **dual-environment workspace** (top bar **JavaScript** vs **Python
 - **Persistence:** Both slices plus the selected **`environment`** are saved under **`localStorage`** key **`llm:dualWorkspace:v1`**. A legacy **`llm:workspace:v1`** snapshot (JS-only) is migrated into the JS slice on first load if the dual key is absent. **Reset** restores default JS and Python workspaces and clears both undo stacks.
 - **Theme:** Top bar **Dark** / **Light** sets **`data-theme`** on **`<html>`** (CSS variables in **`index.css`**). Choice is persisted under **`localStorage`** key **`llm:theme:v1`**. Monaco uses **`vs-dark`** or **`light`** to match. Default is **dark** if storage is missing or invalid.
 - **Export:** Top bar **Export ZIP** downloads **`javascript/`** and **`python/`** folders (all tabs in both workspaces) plus a short **`README.txt`**, built in the browser via **`jszip`**.
-- **Gist snippets:** Per-file **gist-style Markdown** (`### filename` + fenced code block) — copy from the editor header (**Copy snippet**), the strip above the editor, explorer row actions, or the file context menu.
+- **Copy:** **Copy code** — raw file source (paste into an editor). **Copy snippet** — gist-style Markdown (`### filename` + fenced code block) for issues/chat. Per-file copy is via the explorer context menu (right-click) or the active tab’s editor header (**Copy code** / **Copy snippet**). Rename and delete stay as row icons in the explorer (and in the context menu).
 - **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat** vs **Agent**). Server validates **`files`** / **`currentFile`** keys as **`*.js`** or **`*.py`** accordingly; Gemini prompts and tool parsing are **environment-scoped** so the model must not emit cross-environment filenames.
 - **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.4). The Output panel shows **duration** (`Completed in N ms` / `Timed out at N ms`) and short **error labels** (syntax, recursion, timeout, etc.).
 - **Format:** Editor **Format** — **Prettier** in the browser for **`.js`**; **Black** via server subprocess for **`.py`** (`py -m pip install black` on the host running Express). The server tries **`black`**, then **`py -m black`** / **`python -m black`** (and **`PYTHON_BIN -m black`** if set). Optional **`BLACK_BIN`** overrides (e.g. `py -m black`).
@@ -101,16 +101,15 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 
 ### 4.1 Dual environment (JavaScript vs Python)
 
-- **JavaScript workspace:** Explorer tabs are **only** `*.js` single-segment names (e.g. `main.js`, `untitled-1.js`). **New file:** `untitled-N.js` with starter `// New file\n`. **Rename:** base name + fixed **`.js`** suffix in the UI.
-- **Python workspace:** Same rules with **`*.py`** (e.g. `main.py`, `untitled-1.py`), starter **`# New file\n`**, and **`.py`** rename suffix.
+- **JavaScript workspace:** Explorer tabs are **only** `*.js` single-segment names (e.g. `main.js`, `untitled-1.js`). **New file:** `untitled-N.js` starts empty. **Rename:** base name + fixed **`.js`** suffix in the UI.
+- **Python workspace:** Same rules with **`*.py`** (e.g. `main.py`, `untitled-1.py`); new files start empty; **`.py`** rename suffix.
 - The two workspaces **do not share** `files` or `activePath`. Switching the top bar environment swaps the entire editor + explorer + run context. **Chat** threads reset when you switch (in-memory messages per visit to each environment).
 - **Delete:** You cannot delete the **last** file in an environment (a workspace must keep at least one tab).
 
 ### 4.2 Editor, export, and Run
 
-- Monaco language follows the **active environment** and file extension (**JavaScript** or **Python**). The editor header shows the active filename, a small **JS** / **Python** badge, **Copy snippet**, **Format**, and **Run**.
+- Monaco language follows the **active environment** and file extension (**JavaScript** or **Python**). The editor header shows the active filename, a small **JS** / **Python** badge, **Copy code**, **Copy snippet**, **Format**, and **Run**.
 - **Format document:** **`.js`** tabs are formatted in the browser with **Prettier** (`client/src/formatJavaScript.js`). **`.py`** tabs call **`POST /format`** with **`environment: "python"`**; the server runs Black on stdin (`black -q -` or `py -m black -q -`, etc.). Formatted text replaces the active tab and is undoable.
-- **Gist strip:** A compact bar above the editor previews the fence line (e.g. ` ```javascript  main.js `) and offers **Copy** for the full Markdown block of the active tab.
 - **Export ZIP:** **Export ZIP** in the top bar saves both workspace slices (not only the active environment). Filenames are timestamped (`llm-workspace-YYYYMMDD-HHMM.zip`).
 - **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). The Output header shows **Completed in … ms** or **Timed out at … ms**; errors get a short label (**Syntax error**, **Recursion limit**, **Timeout**, etc.) plus the raw message. Output semantics are unchanged from §5.4 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
 
@@ -286,7 +285,7 @@ sequenceDiagram
 | `App.jsx` | Dual **`environment`**, two workspace slices, per-env undo/redo, Run/Format/output, AI diff + toast, theme toggle |
 | `formatJavaScript.js` | Prettier format for **`.js`** in the browser |
 | `theme.js` | **`loadTheme`** / **`persistTheme`** / **`applyTheme`**; key **`llm:theme:v1`** |
-| `workspaceSnippet.js` | **`formatGistSnippet`**, **`gistSnippetPreviewLine`** — Markdown blocks for clipboard |
+| `workspaceSnippet.js` | **`formatGistSnippet`** — Markdown gist blocks for clipboard |
 | `exportWorkspaceZip.js` | **`downloadDualWorkspaceZip`** — browser ZIP via **`jszip`** |
 | `copyToClipboard.js` | **`copyTextToClipboard`** |
 | `workspaceFilename.js` / `workspaceFileValidation.js` | Path policy and validators |
