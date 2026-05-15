@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { sanitizeRunDisplay } from "./stripAnsi.js";
 
 const require = createRequire(import.meta.url);
 const { VM } = require("vm2");
@@ -83,5 +84,5 @@ export function executeJavaScript(code) {
     output = logLines.join("\n");
   }
 
-  return { output, error };
+  return sanitizeRunDisplay({ output, error });
 }

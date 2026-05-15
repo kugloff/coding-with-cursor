@@ -106,3 +106,21 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/App.jsx`**: **JS** / **Python** segmented control; **`runRuntime`** in **`sessionStorage`** (`llm:runRuntime:v1`); **`POST /run`** body **`{ code, runtime }`**; Monaco **`language`** follows runtime for the active tab; output copy and **`aria-label`** depend on runtime.
 - **`client/src/App.css`**: **`.editor-runtime-toggle`**, **`.editor-runtime-btn`**, active state.
 - **`README.md`**: Run UX, **`POST /run`** contract, env vars, security note for Python subprocess, troubleshooting, project layout, contributor touchpoints.
+
+### 2026-05-15 — Compact Gemini prompts (lower instruction tokens)
+
+- **`server/services/geminiService.js`**: Replaced four long static rule blocks with **`ENV_META`** + **`rulesForModeAndEnvironment(mode, environment)`** (same CHAT vs AGENT and JS vs Python constraints, shorter wording). **`buildPromptWithFileContext`** uses one-line role intro, short tags **`[paths]`**, **`[active]`**, **`[file <path>]`**, **`[user]`** (dropped duplicate active-file section and long `---` headers). Truncation markers shortened. No change to **`MAX_CONTEXT_CHARS`**, **`MAX_FILE_CHARS`**, **`parseAssistantModelOutput`**, or API contracts.
+- **`README.md`**: Overview note that system instructions are compact; file-body context caps unchanged.
+
+### 2026-05-15 — Gemini model fallback chain
+
+- **`server/services/geminiService.js`**: **`GEMINI_MODEL_FALLBACK_CHAIN`** — `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite`, `gemini-2.5-pro`. **`generateContentWithModelFallback`** tries each in order; **`shouldRetryNextModel`** skips further models on **401/403/400**; logs **`console.warn`** on retry/success. Removed single **`MODEL_NAME`** constant.
+- **`README.md`**: documents fallback order and retry rules.
+
+### 2026-05-15 — Strip ANSI from Run output (display cleanup)
+
+- **`server/stripAnsi.js`** (new): **`stripAnsi`**, **`sanitizeRunDisplay`** — removes CSI/ESC terminal color and style sequences before the client renders **`output`** / **`error`**.
+- **`server/runPython.js`**: all return paths via **`finish()`** → **`sanitizeRunDisplay`**.
+- **`server/runCode.js`**: **`sanitizeRunDisplay`** on final **`{ output, error }`**.
+- **`server/scripts/test-strip-ansi.mjs`**: assert-based smoke test; **`npm run test:strip-ansi`** in **`server/package.json`**.
+- **`README.md`**: §4.5 testing Run output (ANSI cleanup); §5.3 notes stripping on **`POST /run`** response.

@@ -1,43 +1,20 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { parseAssistantModelOutput } from "../assistantOutput.js";
 
-const MODEL_NAME = "gemini-2.0-flash";
+/** Try in order; last entry is the final fallback. */
+export const GEMINI_MODEL_FALLBACK_CHAIN = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-pro",
+];
 
-const CHAT_MODE_RULES_JS = `CHAT MODE — read-only assistant (no workspace writes via this API):
-- Reply in natural language only. Do NOT output edit_file or create_file JSON, and do NOT output any JSON object meant as a machine action.
-- You may use normal Markdown (including fenced code blocks) only to explain or illustrate ideas. Code in fences is for discussion; it does not modify the user's files.
-- This workspace is JavaScript-only (.js file tabs). Use the provided file contents to answer questions, suggest refactors, or explain behavior in prose.
-- Never pretend you have applied edits to the repository; the user applies changes manually unless a different product mode is used.`;
-
-const CHAT_MODE_RULES_PY = `CHAT MODE — read-only assistant (no workspace writes via this API):
-- Reply in natural language only. Do NOT output edit_file or create_file JSON, and do NOT output any JSON object meant as a machine action.
-- You may use normal Markdown (including fenced code blocks) only to explain or illustrate ideas. Code in fences is for discussion; it does not modify the user's files.
-- This workspace is Python-only (.py file tabs). Use the provided file contents to answer questions, suggest refactors, or explain behavior in prose.
-- Never pretend you have applied edits to the repository; the user applies changes manually unless a different product mode is used.`;
-
-const AGENT_MODE_RULES_JS = `AGENT MODE — workspace editing agent (structured output only):
-- Output MUST be exactly one JSON object and nothing else: no prose before or after, no markdown fences, no commentary, no labels.
-- This workspace is JavaScript-only: every path ends with ".js"; file bodies in "content" must be plain JavaScript only.
-- To replace an entire existing file, use ONLY:
-  {"action":"edit_file","filename":"<path>","content":"<full new file text>"}
-  "filename" must match an exact path from the project file list (or the active file path) and MUST end with ".js".
-- To add a new file, use ONLY:
-  {"action":"create_file","filename":"<name>.js","content":"<full new file text>"}
-  Filename MUST end with ".js" (single basename: no slashes or backslashes). If the path already exists, use edit_file instead.
-- "content" must be a valid JSON string (escape quotes, newlines, etc.).
-- Do not include any text outside the single JSON object.`;
-
-const AGENT_MODE_RULES_PY = `AGENT MODE — workspace editing agent (structured output only):
-- Output MUST be exactly one JSON object and nothing else: no prose before or after, no markdown fences, no commentary, no labels.
-- This workspace is Python-only: every path ends with ".py"; file bodies in "content" must be plain Python only.
-- To replace an entire existing file, use ONLY:
-  {"action":"edit_file","filename":"<path>","content":"<full new file text>"}
-  "filename" must match an exact path from the project file list (or the active file path) and MUST end with ".py".
-- To add a new file, use ONLY:
-  {"action":"create_file","filename":"<name>.py","content":"<full new file text>"}
-  Filename MUST end with ".py" (single basename: no slashes or backslashes). If the path already exists, use edit_file instead.
-- "content" must be a valid JSON string (escape quotes, newlines, etc.).
-- Do not include any text outside the single JSON object.`;
+/** Per-environment labels for compact prompts (behavior unchanged). */
+const ENV_META = {
+  js: { ext: "js", lang: "JavaScript" },
+  python: { ext: "py", lang: "Python" },
+};
 
 /**
  * @param {"chat" | "agent"} mode
@@ -45,10 +22,20 @@ const AGENT_MODE_RULES_PY = `AGENT MODE — workspace editing agent (structured 
  */
 function rulesForModeAndEnvironment(mode, environment) {
   const env = environment === "python" ? "python" : "js";
+  const { ext, lang } = ENV_META[env];
   if (mode === "agent") {
-    return env === "python" ? AGENT_MODE_RULES_PY : AGENT_MODE_RULES_JS;
+    return `AGENT (${lang}, *.${ext}):
+- Exactly one JSON object in the reply; no prose, fences, or labels.
+- "content" = full file body as a JSON string (escape quotes and newlines).
+- edit_file (existing path): {"action":"edit_file","filename":"<path from [paths]>","content":"..."}
+- create_file (new basename only, no /): {"action":"create_file","filename":"name.${ext}","content":"..."}
+- If the path already exists, use edit_file. Language in "content" must be ${lang} only.`;
   }
-  return env === "python" ? CHAT_MODE_RULES_PY : CHAT_MODE_RULES_JS;
+  return `CHAT (${lang}, *.${ext}):
+- Natural language only; no edit_file/create_file or other action JSON.
+- Markdown/fenced code for explanation only (not applied to the workspace).
+- Use file sections below; default to [active] unless the user names another path.
+- Do not claim files were modified. Mention truncation briefly if it affects the answer.`;
 }
 
 /** Total characters of file bodies included in the prompt (soft cap). */
@@ -84,18 +71,18 @@ export class GeminiApiError extends Error {
  */
 function appendFileBody(parts, raw, budget) {
   if (typeof raw !== "string") {
-    parts.push("[content was not provided for this path]", "");
+    parts.push("[missing]", "");
     return budget;
   }
   let body = raw;
   let truncated = "";
   if (body.length > MAX_FILE_CHARS) {
     body = body.slice(0, MAX_FILE_CHARS);
-    truncated = "\n[…truncated: file exceeded per-file limit]";
+    truncated = "\n[truncated: per-file cap]";
   }
   if (body.length > budget) {
     body = body.slice(0, budget);
-    truncated += "\n[…truncated: workspace context limit]";
+    truncated += "\n[truncated: context cap]";
     budget = 0;
   } else {
     budget -= body.length;
@@ -121,52 +108,25 @@ function buildPromptWithFileContext(message, files, currentFile, mode, environme
   const current =
     typeof currentFile === "string" && currentFile.trim() ? currentFile.trim() : null;
 
-  const parts = [];
-
-  if (mode === "agent") {
-    parts.push(
-      env === "python"
-        ? "You are a workspace editing agent for a web-based Python editor."
-        : "You are a workspace editing agent for a web-based JavaScript editor.",
-      "Your ONLY task is to output exactly one JSON object: either edit_file or create_file, per the AGENT MODE rules at the end. No prose, no markdown fences, no explanations.",
-      "The client will parse your entire reply as that single JSON value.",
-      ""
-    );
-  } else {
-    parts.push(
-      env === "python"
-        ? "You are a helpful coding assistant in CHAT MODE. The user is working in a web-based editor with multiple in-memory .py files."
-        : "You are a helpful coding assistant in CHAT MODE. The user is working in a web-based editor with multiple in-memory .js files.",
-      "You must NOT output edit_file, create_file, or any other machine-action JSON. Answer in natural language only; use Markdown (including fenced code) only to explain.",
-      "Use the sections below to answer questions about their code, suggest refactors, find bugs, or explain behavior.",
-      "The ACTIVE editor file is named explicitly; treat the user's question as about that file unless they clearly refer to another path from the project list.",
-      "If a file is truncated, say so briefly if it affects your answer.",
-      ""
-    );
-  }
-
-  parts.push(
-    "--- Project file list (exact paths; use these strings for edit_file.filename when in agent mode) ---",
-    pathsSorted.length ? pathsSorted.join(", ") : "(no files in workspace payload)",
-    ""
-  );
-
-  parts.push("--- Active editor file (filename only) ---", current ?? "(none — no file is focused)", "");
+  const { lang } = ENV_META[env];
+  const parts = [
+    mode === "agent"
+      ? `${lang} workspace agent — one edit_file or create_file JSON (rules at end).`
+      : `${lang} workspace assistant — chat only (rules at end).`,
+    "[paths]",
+    pathsSorted.length ? pathsSorted.join(", ") : "(none)",
+    "[active]",
+    current ?? "(none)",
+    "",
+  ];
 
   let budget = MAX_CONTEXT_CHARS;
 
   if (current) {
-    parts.push(
-      "--- Current file (full content; this is the focused tab in the editor) ---",
-      `Filename: ${current}`,
-      ""
-    );
+    parts.push(`[file ${current}]`, "");
     const activeRaw = fileMap[current];
     if (activeRaw === undefined) {
-      parts.push(
-        "[Note: this path is not present in the files map — the client did not send content for it.]",
-        ""
-      );
+      parts.push("[content not in payload]", "");
     } else {
       budget = appendFileBody(parts, activeRaw, budget);
     }
@@ -174,20 +134,14 @@ function buildPromptWithFileContext(message, files, currentFile, mode, environme
 
   const others = pathsSorted.filter((p) => p !== current);
   if (others.length > 0 && budget > 0) {
-    parts.push("--- Other workspace files ---", "");
     for (const path of others) {
       if (budget <= 0) break;
-      parts.push(`Filename: ${path}`, "");
+      parts.push(`[file ${path}]`, "");
       budget = appendFileBody(parts, fileMap[path], budget);
     }
   }
 
-  parts.push(
-    "--- User message ---",
-    message.trim(),
-    "",
-    rulesForModeAndEnvironment(mode, env)
-  );
+  parts.push("[user]", message.trim(), "", rulesForModeAndEnvironment(mode, env));
   return parts.join("\n");
 }
 
@@ -216,35 +170,10 @@ export async function generateResponse({ message, files, currentFile, mode = "ch
 
   const prompt = hasContext
     ? buildPromptWithFileContext(message, fileMap, currentFile, modeNorm, envNorm)
-    : `${rulesForModeAndEnvironment(modeNorm, envNorm)}\n\n--- User message ---\n${message.trim()}`;
+    : `${rulesForModeAndEnvironment(modeNorm, envNorm)}\n\n[user]\n${message.trim()}`;
 
   const genAI = new GoogleGenerativeAI(apiKey.trim());
-  const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-
-  let result;
-  try {
-    result = await model.generateContent(prompt);
-  } catch (err) {
-    throw mapUpstreamError(err);
-  }
-
-  const apiResponse = result?.response;
-  if (!apiResponse) {
-    throw new GeminiApiError("Gemini returned no response object");
-  }
-
-  let text;
-  try {
-    text = apiResponse.text();
-  } catch (err) {
-    throw new GeminiApiError("Failed to read text from Gemini response", {
-      cause: err,
-    });
-  }
-
-  if (typeof text !== "string" || !text.trim()) {
-    throw new GeminiApiError("Gemini returned empty text");
-  }
+  const { text } = await generateContentWithModelFallback(genAI, prompt);
 
   if (modeNorm === "chat") {
     return { response: text.trim(), toolCall: null };
@@ -256,6 +185,93 @@ export async function generateResponse({ message, files, currentFile, mode = "ch
   }
   throw new GeminiApiError(
     "Agent mode: expected a single edit_file or create_file JSON object with no surrounding text."
+  );
+}
+
+/**
+ * @param {import("@google/generative-ai").GoogleGenerativeAI} genAI
+ * @param {string} prompt
+ * @returns {Promise<{ text: string, modelId: string }>}
+ */
+async function generateContentWithModelFallback(genAI, prompt) {
+  /** @type {{ modelId: string, err: GeminiApiError }[]} */
+  const failures = [];
+
+  for (let i = 0; i < GEMINI_MODEL_FALLBACK_CHAIN.length; i++) {
+    const modelId = GEMINI_MODEL_FALLBACK_CHAIN[i];
+    if (i > 0) {
+      console.warn(
+        `Gemini: trying ${modelId} after ${failures[failures.length - 1].modelId} failed (${failures[failures.length - 1].err.message})`,
+      );
+    }
+
+    try {
+      const model = genAI.getGenerativeModel({ model: modelId });
+      const result = await model.generateContent(prompt);
+      const text = readTextFromGenerateResult(result, modelId);
+      if (i > 0) {
+        console.warn(`Gemini: succeeded with fallback model ${modelId}`);
+      }
+      return { text, modelId };
+    } catch (err) {
+      const mapped =
+        err instanceof GeminiApiError ? err : mapUpstreamError(err);
+      failures.push({ modelId, err: mapped });
+      if (!shouldRetryNextModel(mapped, i)) {
+        throw mapped;
+      }
+    }
+  }
+
+  throw buildAllModelsFailedError(failures);
+}
+
+/**
+ * @param {unknown} result
+ * @param {string} modelId
+ * @returns {string}
+ */
+function readTextFromGenerateResult(result, modelId) {
+  const apiResponse = result?.response;
+  if (!apiResponse) {
+    throw new GeminiApiError(`Gemini (${modelId}) returned no response object`);
+  }
+  let text;
+  try {
+    text = apiResponse.text();
+  } catch (err) {
+    throw new GeminiApiError(`Failed to read text from Gemini (${modelId})`, {
+      cause: err,
+    });
+  }
+  if (typeof text !== "string" || !text.trim()) {
+    throw new GeminiApiError(`Gemini (${modelId}) returned empty text`);
+  }
+  return text.trim();
+}
+
+/**
+ * @param {GeminiApiError} err
+ * @param {number} index index in GEMINI_MODEL_FALLBACK_CHAIN
+ */
+function shouldRetryNextModel(err, index) {
+  if (index >= GEMINI_MODEL_FALLBACK_CHAIN.length - 1) return false;
+  const status = err.statusCode;
+  if (status === 401 || status === 403) return false;
+  if (status === 400) return false;
+  return true;
+}
+
+/**
+ * @param {{ modelId: string, err: GeminiApiError }[]} failures
+ * @returns {GeminiApiError}
+ */
+function buildAllModelsFailedError(failures) {
+  const detail = failures.map((f) => `${f.modelId}: ${f.err.message}`).join("; ");
+  const last = failures[failures.length - 1]?.err;
+  return new GeminiApiError(
+    `All Gemini models failed (${GEMINI_MODEL_FALLBACK_CHAIN.join(" → ")}). ${detail}`,
+    { cause: last, statusCode: last?.statusCode ?? 502 },
   );
 }
 

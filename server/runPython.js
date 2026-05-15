@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { RUN_TIMEOUT_MS } from "./runCode.js";
+import { sanitizeRunDisplay } from "./stripAnsi.js";
 
 /** Max combined stdout/stderr bytes from one Python run (spawnSync `maxBuffer`). */
 const PYTHON_MAX_BUFFER = 10 * 1024 * 1024;
@@ -10,6 +11,17 @@ function resolvePythonTimeoutMs() {
   const n = Number.parseInt(String(raw), 10);
   if (!Number.isFinite(n) || n < 1) return RUN_TIMEOUT_MS;
   return Math.min(n, 60_000);
+}
+
+/**
+ * @param {{ output?: string, error?: string }} partial
+ * @returns {{ output: string, error: string }}
+ */
+function finish(partial) {
+  return sanitizeRunDisplay({
+    output: partial.output ?? "",
+    error: partial.error ?? "",
+  });
 }
 
 /**
@@ -43,29 +55,29 @@ export function executePython(code) {
   if (result.error) {
     const err = result.error;
     if (err.code === "ENOENT") {
-      return {
+      return finish({
         output: "",
         error: `Python not found (${exe}). Install Python 3 or set PYTHON_BIN in the server environment.`,
-      };
+      });
     }
     if (err.code === "ETIMEDOUT") {
-      return {
+      return finish({
         output: stdout,
         error: stderr.trim() || "Python execution timed out.",
-      };
+      });
     }
-    return { output: stdout, error: err.message || String(err) };
+    return finish({ output: stdout, error: err.message || String(err) });
   }
 
   if (result.signal) {
     const tail = stderr.trim() || `Process ended with signal ${result.signal}`;
-    return { output: stdout, error: tail };
+    return finish({ output: stdout, error: tail });
   }
 
   if (result.status !== 0 && result.status !== null) {
     const errMsg = stderr.trim() || `Exit code ${result.status}`;
-    return { output: stdout, error: errMsg };
+    return finish({ output: stdout, error: errMsg });
   }
 
-  return { output: stdout, error: stderr };
+  return finish({ output: stdout, error: stderr });
 }

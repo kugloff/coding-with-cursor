@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "test:strip-ansi": "node scripts/test-strip-ansi.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

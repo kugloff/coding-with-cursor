@@ -41,7 +41,7 @@ Browser-based **dual-environment workspace** (top bar **JavaScript** vs **Python
 - **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat** vs **Agent**). Server validates **`files`** / **`currentFile`** keys as **`*.js`** or **`*.py`** accordingly; Gemini prompts and tool parsing are **environment-scoped** so the model must not emit cross-environment filenames.
 - **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.3).
 
-**Gemini:** `@google/generative-ai`, model name in **`MODEL_NAME`** inside `server/services/geminiService.js` (e.g. **`gemini-2.5-flash`**). API key: **`GEMINI_API_KEY`**.
+**Gemini:** `@google/generative-ai`, API key: **`GEMINI_API_KEY`**. Chat calls **`generateContent`** with automatic model fallback in **`GEMINI_MODEL_FALLBACK_CHAIN`** (`server/services/geminiService.js`): **`gemini-2.5-flash`** → **`gemini-2.5-flash-lite`** → **`gemini-3-flash-preview`** → **`gemini-3.1-flash-lite`** → **`gemini-2.5-pro`**. On recoverable failures (e.g. model unavailable, 429, 5xx, empty reply), the server tries the next model; **401/403** and **400** do not advance the chain. Prompts use compact section tags; file bodies still respect **`MAX_CONTEXT_CHARS`** / **`MAX_FILE_CHARS`**.
 
 ---
 
@@ -105,7 +105,7 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 ### 4.2 Editor and Run
 
 - Monaco language follows the **active environment** and file extension (**JavaScript** or **Python**). The editor header shows the active filename and a small **JS** / **Python** badge mirroring the top bar.
-- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). Output semantics are unchanged from §5.3 (JS **`console.*`**, Python **stdout** / **stderr**).
+- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). Output semantics are unchanged from §5.3 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
 
 ### 4.3 AI chat and file proposals
 
@@ -113,6 +113,48 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 - **Chat mode:** The server never parses or applies tool JSON; replies are natural language (Markdown allowed). The client ignores any **`toolCall`** unless **`mode`** and **`environment`** from the server match the request.
 - **Agent mode:** The model must return a single valid **`edit_file`** or **`create_file`** JSON object with paths ending in **`.js`** (when **`environment`** is JS) or **`.py`** (when Python). Valid payloads open **`AiEditPreviewModal`**. **Accept** updates only the **current** environment’s `files` / `activePath`.
 - Composer sends **`message`**, **`files`**, **`currentFile`**, **`mode`**, and **`environment`** to **`POST /chat`**.
+
+### 4.5 Testing Run output (ANSI cleanup)
+
+**Automated (server):**
+
+```powershell
+cd server
+npm run test:strip-ansi
+```
+
+**Manual in the UI (Python — typical colored tracebacks):**
+
+1. Switch to **Python**, open `main.py`, paste and **Run**:
+
+```python
+def dangerous_recursion(n=0):
+    return dangerous_recursion(n + 1)
+
+dangerous_recursion()
+```
+
+2. **Expect:** Output **error** shows a normal traceback (`File "<stdin>"`, `RecursionError`, …) with **no** `[35m`, `[0m`, or other escape junk.
+
+**Manual (Python — explicit ANSI in print):**
+
+```python
+print("\033[31mred\033[0m plain")
+raise RuntimeError("after color")
+```
+
+3. **Expect:** `red plain` in **output** (or error text without raw `\033` sequences).
+
+**Manual (API with curl / Invoke-RestMethod):**
+
+```powershell
+$body = @{ code = "print(chr(27)+'[31mhi'+chr(27)+'[0m')"; environment = "python" } | ConvertTo-Json
+Invoke-RestMethod -Uri http://localhost:3001/run -Method POST -ContentType "application/json" -Body $body
+```
+
+4. **Expect:** JSON **`output`** is `hi` (or `hi` plus newline), not containing `[31m`.
+
+**JavaScript:** vm2 errors rarely include ANSI; run `throw new Error("fail")` and confirm the message displays normally.
 
 ### 4.4 Workspace state (reference)
 
@@ -170,7 +212,7 @@ sequenceDiagram
 
 - **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
 - **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** (default **`"js"`**). Legacy **`runtime`** is read if **`environment`** is omitted (same normalization). Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
-- **200:** **`{ output, error }`** (same shape). **`error`** may be non-empty on HTTP 200 (e.g. Python **`stderr`**, or JS exception after **`console`** capture).
+- **200:** **`{ output, error }`** (same shape). **`output`** and **`error`** are passed through **`stripAnsi`** (`server/stripAnsi.js`) so ANSI color codes from Python tracebacks (and similar) do not appear in the UI. **`error`** may be non-empty on HTTP 200 (e.g. Python **`stderr`**, or JS exception after **`console`** capture).
 - **`environment: "js"`** (default): **`executeJavaScript`** in **`runCode.js`** — unchanged **`vm2`** sandbox (stub **`console`** only; **`eval`**, **`wasm`**, async disabled; **`RUN_TIMEOUT_MS`** from **`RUN_VM_TIMEOUT_MS`**).
 - **`environment: "python"`**: **`executePython`** in **`runPython.js`** — subprocess (**`-I -u -`**, script on stdin). **Not** a JS-class sandbox.
 - **400 / 500:** Same JSON **`{ output, error }`** shapes as today where applicable.
@@ -193,6 +235,9 @@ sequenceDiagram
 │   ├── workspaceFileValidation.js
 │   ├── runCode.js
 │   ├── runPython.js
+│   ├── stripAnsi.js
+│   ├── scripts/
+│   │   └── test-strip-ansi.mjs
 │   ├── .env.example
 │   └── services/
 │       └── geminiService.js
@@ -293,7 +338,7 @@ When requesting changes, specify: **which side** (`server` / `client` / both), *
 | Chat / Gemini | `server/services/geminiService.js`, `assistantOutput.js`, `chatBody.js`, `ChatPanel.jsx`, `App.jsx` |
 | Workspace paths / validation | `workspaceFilename.js`, `workspaceFileValidation.js` (client + server), `FileExplorer.jsx`, `App.jsx` |
 | Browser workspace persistence | `workspaceStorage.js`, `App.jsx` (persist effect, **Reset**), `App.css` (reset button) |
-| Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
+| Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/stripAnsi.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
 | UI / Monaco | `App.css`, `index.css`, `CodeEditor.jsx`, `vite.config.js`, `index.html`, `public/favicon.svg` |
 
 Record **factual implementation changes** in [`agent-memory.md`](./agent-memory.md) (append-only).
