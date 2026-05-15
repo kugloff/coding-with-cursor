@@ -2,21 +2,22 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RUN_TIMEOUT_MS } from "./runCode.js";
 import { sanitizeRunDisplay } from "./stripAnsi.js";
 
 /** Max combined stdout/stderr bytes from one C# run (spawnSync `maxBuffer`). */
 const CSHARP_MAX_BUFFER = 10 * 1024 * 1024;
 const PROGRAM_FILE = "Program.cs";
 const PROJECT_FILE = "RunSnippet.csproj";
-const DEFAULT_RUN_TIMEOUT_MS = 30_000;
 const DEFAULT_TFM = "net8.0";
+const CSHARP_MAX_TIMEOUT_MS = 120_000;
 
 function resolveCsharpTimeoutMs() {
   const raw = process.env.RUN_CSHARP_TIMEOUT_MS ?? process.env.RUN_PYTHON_TIMEOUT_MS;
-  if (raw === undefined || raw === "") return DEFAULT_RUN_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return RUN_TIMEOUT_MS;
   const n = Number.parseInt(String(raw), 10);
-  if (!Number.isFinite(n) || n < 1) return DEFAULT_RUN_TIMEOUT_MS;
-  return Math.min(n, 120_000);
+  if (!Number.isFinite(n) || n < 1) return RUN_TIMEOUT_MS;
+  return Math.min(n, CSHARP_MAX_TIMEOUT_MS);
 }
 
 function resolveTargetFramework() {

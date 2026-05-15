@@ -40,7 +40,7 @@ It must NOT describe intended features, only implemented changes.
 
 **Run (`POST /run`)**
 
-- **`server/runCode.js`**: `executeJavaScript(code)`; **`vm2`** `VM`; sandbox **only** stub `console`; `eval: false`, `wasm: false`, `allowAsync: false`, `bufferAllocLimit` 1 MiB; `RUN_TIMEOUT_MS` default 1000 ms from **`RUN_VM_TIMEOUT_MS`** env (clamped 1–60000) at module load; `MAX_RUN_CODE_CHARS` 500_000; strict wrapper.
+- **`server/runCode.js`**: `executeJavaScript(code)`; **`vm2`** `VM`; sandbox **only** stub `console`; `eval: false`, `wasm: false`, `allowAsync: false`, `bufferAllocLimit` 1 MiB; `RUN_TIMEOUT_MS` default **5000** ms from **`RUN_VM_TIMEOUT_MS`** env (clamped 1–60000) at module load; `MAX_RUN_CODE_CHARS` 500_000; strict wrapper.
 - Client: **`App.jsx`** Run button + output panel; minimize/expand chevron; Vite proxy `/run` → Express.
 
 **UI / client modules**
@@ -203,7 +203,7 @@ It must NOT describe intended features, only implemented changes.
 
 ### 2026-05-15 — C# Run via dotnet run
 
-- **`server/runCsharp.js`** (new): **`executeCsharp`** — temp dir with **`Program.cs`** + **`RunSnippet.csproj`**, **`dotnet run --nologo`**; **`RUN_CSHARP_TIMEOUT_MS`** (default **30s**), **`DOTNET_TFM`** (default **net8.0**), **`DOTNET_BIN`**.
+- **`server/runCsharp.js`** (new): **`executeCsharp`** — temp dir with **`Program.cs`** + **`RunSnippet.csproj`**, **`dotnet run --nologo`**; **`RUN_CSHARP_TIMEOUT_MS`** (else **`RUN_PYTHON_TIMEOUT_MS`**, else **`RUN_TIMEOUT_MS`** default **5s**), **`DOTNET_TFM`** (default **net8.0**), **`DOTNET_BIN`**.
 - **`server/index.js`**: **`POST /run`** routes **`environment: "csharp"`** to **`executeCsharp`**.
 - **`server/runMeta.js`**: C# timeout + **CS####** syntax / **dotnet not found** classification.
 - **`shared/workspaceEnvironments.js`**: **`csharp.runSupported: true`**.

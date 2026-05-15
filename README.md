@@ -89,8 +89,9 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 | `PORT` | `3001` | API listen port |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | CORS allowed origin |
 | `GEMINI_API_KEY` | _(required for chat)_ | Gemini API key |
-| `RUN_VM_TIMEOUT_MS` | `1000` | **`environment: "js"`** on **`POST /run`** — wall-clock timeout (ms) for **`vm2`**, clamped **1–60000**; read when `runCode.js` loads (**restart** after change) |
-| `RUN_PYTHON_TIMEOUT_MS` | _(falls back to `RUN_VM_TIMEOUT_MS`)_ | **`environment: "python"`** — subprocess wall-clock timeout (ms), clamped **1–60000** |
+| `RUN_VM_TIMEOUT_MS` | `5000` | **`environment: "js"`** on **`POST /run`** — wall-clock timeout (ms) for **`vm2`**, clamped **1–60000**; read when `runCode.js` loads (**restart** after change) |
+| `RUN_PYTHON_TIMEOUT_MS` | _(falls back to `RUN_VM_TIMEOUT_MS` / **5000**)_ | **`environment: "python"`** — subprocess wall-clock timeout (ms), clamped **1–60000** |
+| `RUN_CSHARP_TIMEOUT_MS` | _(falls back to `RUN_PYTHON_TIMEOUT_MS` then **5000**)_ | **`environment: "csharp"`** — **`dotnet run`** wall-clock timeout (ms), clamped **1–120000** |
 | `PYTHON_BIN` | `python` on Windows, `python3` elsewhere | **`environment: "python"`** — executable passed to **`spawnSync`** |
 
 **Tracked template:** `server/.env.example` (never commit real secrets).
@@ -236,7 +237,7 @@ sequenceDiagram
 
 - **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
 - **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** \| **`"csharp"`** (default **`"js"`**). Legacy **`runtime`** is accepted. Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
-- **200:** **`{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }`**. **`output`** and **`error`** are passed through **`stripAnsi`**. **`timeoutMs`**: **`RUN_VM_TIMEOUT_MS`** (JS), **`RUN_PYTHON_TIMEOUT_MS`** (Python), **`RUN_CSHARP_TIMEOUT_MS`** (C#, default **30000**). **`errorLabel`** buckets include **Syntax error** (e.g. C# **CS####** build errors).
+- **200:** **`{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }`**. **`output`** and **`error`** are passed through **`stripAnsi`**. **`timeoutMs`**: **`RUN_VM_TIMEOUT_MS`** (JS, default **5000**), **`RUN_PYTHON_TIMEOUT_MS`** (Python), **`RUN_CSHARP_TIMEOUT_MS`** (C#). **`errorLabel`** buckets include **Syntax error** (e.g. C# **CS####** build errors).
 - **`environment: "js"`** (default): **`executeJavaScript`** — **`vm2`** sandbox.
 - **`environment: "python"`**: **`executePython`** — Python subprocess on stdin.
 - **`environment: "csharp"`**: **`executeCsharp`** — temp **`RunSnippet.csproj`** + **`Program.cs`**, then **`dotnet run`**. Requires a compilable console program. **`DOTNET_TFM`** (default **`net8.0`**), **`DOTNET_BIN`**, **`RUN_CSHARP_TIMEOUT_MS`**.

@@ -6,15 +6,19 @@ const { VM } = require("vm2");
 
 /** Max source length sent to POST /run (bytes-ish, string length). */
 export const MAX_RUN_CODE_CHARS = 500_000;
+
+/** Default wall-clock timeout (ms) for POST /run when env overrides are unset. */
+export const DEFAULT_RUN_TIMEOUT_MS = 5000;
+
 /**
  * Wall-clock timeout for each vm2 `VM.run` (sync script only; see `allowAsync: false`).
- * Override with env `RUN_VM_TIMEOUT_MS` (integer ms, clamped 1–60000); default **1000**.
+ * Override with env `RUN_VM_TIMEOUT_MS` (integer ms, clamped 1–60000); default **5000**.
  */
 function resolveRunTimeoutMs() {
   const raw = process.env.RUN_VM_TIMEOUT_MS;
-  if (raw === undefined || raw === "") return 1000;
+  if (raw === undefined || raw === "") return DEFAULT_RUN_TIMEOUT_MS;
   const n = Number.parseInt(String(raw), 10);
-  if (!Number.isFinite(n) || n < 1) return 1000;
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_RUN_TIMEOUT_MS;
   return Math.min(n, 60_000);
 }
 
