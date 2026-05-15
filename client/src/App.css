@@ -806,8 +806,9 @@
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.28rem 0.4rem;
   padding: 0.2rem 0.35rem 0.2rem 0.55rem;
   font-size: 0.625rem;
   font-weight: 600;
@@ -822,8 +823,70 @@
 }
 
 .run-output__head-title {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  margin-right: auto;
+  text-transform: uppercase;
+}
+
+.run-output__status {
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-secondary);
+}
+
+.run-output__status--pending {
+  color: var(--text-muted);
+}
+
+.run-output__status--ok {
+  color: var(--accent-dim);
+}
+
+.run-output__status--error {
+  color: var(--text-muted);
+}
+
+.run-output__status--timeout {
+  color: var(--warn);
+}
+
+.run-output__error-tag {
+  flex-shrink: 0;
+  padding: 0.06rem 0.35rem;
+  border-radius: var(--radius-full);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.run-output__error-tag--error {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border-soft);
+}
+
+.run-output__error-tag--timeout {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+}
+
+.run-output__error-block {
+  margin-bottom: 0.35rem;
+}
+
+.run-output__error-kind {
+  margin: 0 0 0.2rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--danger);
 }
 
 .run-output__min-btn {

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "test:strip-ansi": "node scripts/test-strip-ansi.mjs"
+    "test:strip-ansi": "node scripts/test-strip-ansi.mjs",
+    "test:run-error-kind": "node scripts/test-run-error-kind.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

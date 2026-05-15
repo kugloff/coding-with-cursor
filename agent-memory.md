@@ -172,3 +172,12 @@ It must NOT describe intended features, only implemented changes.
 - **`server/formatPython.js`**: **`getBlackInvocationCandidates`** — tries **`black`**, then **`PYTHON_BIN -m black`**, then **`py -m black`** / **`python -m black`** (platform-specific); **`BLACK_BIN`** supports custom executable or `py -m black`; ENOENT tries next candidate; clearer aggregate error.
 - **`server/.env.example`**: install note and **`BLACK_BIN=py -m black`** example.
 - **`README.md`**: fallback chain and Windows **`py -m pip install black`** troubleshooting.
+
+### 2026-05-15 — Run UX: duration + error labels
+
+- **`server/runMeta.js`** (new): **`classifyRunError`**, **`buildRunResponse`**, **`timeoutMsForRunEnvironment`** — buckets **timeout**, **recursion**, **syntax**, **runtime**, **config**; labels via **`RUN_ERROR_LABELS`**.
+- **`server/index.js`**: **`POST /run`** measures **`durationMs`** with **`performance.now()`**; JSON adds **`timeoutMs`**, **`runStatus`**, **`errorKind`**, **`errorLabel`** (keeps **`output`**, **`error`**).
+- **`server/scripts/test-run-error-kind.mjs`**, **`npm run test:run-error-kind`**.
+- **`client/src/App.jsx`**: **`runMeta`**, **`runErrorLabel`**; Output header **Running…** / **Completed in N ms** / **Timed out at N ms**; error tag + kind line in body.
+- **`client/src/App.css`**: **`.run-output__status`**, **`.run-output__error-tag`**, **`.run-output__error-kind`**.
+- **`README.md`**: overview, §4.2, §5.1 / §5.4, layout, troubleshooting.

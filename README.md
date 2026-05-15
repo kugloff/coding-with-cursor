@@ -42,7 +42,7 @@ Browser-based **dual-environment workspace** (top bar **JavaScript** vs **Python
 - **Export:** Top bar **Export ZIP** downloads **`javascript/`** and **`python/`** folders (all tabs in both workspaces) plus a short **`README.txt`**, built in the browser via **`jszip`**.
 - **Gist snippets:** Per-file **gist-style Markdown** (`### filename` + fenced code block) — copy from the editor header (**Copy snippet**), the strip above the editor, explorer row actions, or the file context menu.
 - **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat** vs **Agent**). Server validates **`files`** / **`currentFile`** keys as **`*.js`** or **`*.py`** accordingly; Gemini prompts and tool parsing are **environment-scoped** so the model must not emit cross-environment filenames.
-- **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.4).
+- **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.4). The Output panel shows **duration** (`Completed in N ms` / `Timed out at N ms`) and short **error labels** (syntax, recursion, timeout, etc.).
 - **Format:** Editor **Format** — **Prettier** in the browser for **`.js`**; **Black** via server subprocess for **`.py`** (`py -m pip install black` on the host running Express). The server tries **`black`**, then **`py -m black`** / **`python -m black`** (and **`PYTHON_BIN -m black`** if set). Optional **`BLACK_BIN`** overrides (e.g. `py -m black`).
 
 **Gemini:** `@google/generative-ai`, API key: **`GEMINI_API_KEY`**. Chat calls **`generateContent`** with automatic model fallback in **`GEMINI_MODEL_FALLBACK_CHAIN`** (`server/services/geminiService.js`): **`gemini-2.5-flash`** → **`gemini-2.5-flash-lite`** → **`gemini-3-flash-preview`** → **`gemini-3.1-flash-lite`** → **`gemini-2.5-pro`**. On recoverable failures (e.g. model unavailable, 429, 5xx, empty reply), the server tries the next model; **401/403** and **400** do not advance the chain. Prompts use compact section tags; file bodies still respect **`MAX_CONTEXT_CHARS`** / **`MAX_FILE_CHARS`**.
@@ -112,7 +112,7 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 - **Format document:** **`.js`** tabs are formatted in the browser with **Prettier** (`client/src/formatJavaScript.js`). **`.py`** tabs call **`POST /format`** with **`environment: "python"`**; the server runs Black on stdin (`black -q -` or `py -m black -q -`, etc.). Formatted text replaces the active tab and is undoable.
 - **Gist strip:** A compact bar above the editor previews the fence line (e.g. ` ```javascript  main.js `) and offers **Copy** for the full Markdown block of the active tab.
 - **Export ZIP:** **Export ZIP** in the top bar saves both workspace slices (not only the active environment). Filenames are timestamped (`llm-workspace-YYYYMMDD-HHMM.zip`).
-- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). Output semantics are unchanged from §5.4 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
+- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). The Output header shows **Completed in … ms** or **Timed out at … ms**; errors get a short label (**Syntax error**, **Recursion limit**, **Timeout**, etc.) plus the raw message. Output semantics are unchanged from §5.4 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
 
 ### 4.3 AI chat and file proposals
 
@@ -128,6 +128,7 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 ```powershell
 cd server
 npm run test:strip-ansi
+npm run test:run-error-kind
 ```
 
 **Manual in the UI (Python — typical colored tracebacks):**
@@ -203,7 +204,7 @@ sequenceDiagram
 | GET | `/api/health` | `{ ok, service, timestamp }` |
 | GET | `/api/hello` | `{ message }` |
 | POST | `/chat` | `{ response, toolCall, mode, environment, model, modelFallback, modelChain }` — see §5.2 |
-| POST | `/run` | `{ output, error }` from **`code`** + **`environment`** (legacy **`runtime`** accepted) |
+| POST | `/run` | `{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }` — see §5.4 |
 | POST | `/format` | `{ code, error }` — Python only (**Black**); JS is formatted in the browser |
 
 ### 5.2 `POST /chat`
@@ -227,7 +228,7 @@ sequenceDiagram
 
 - **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
 - **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** (default **`"js"`**). Legacy **`runtime`** is read if **`environment`** is omitted (same normalization). Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
-- **200:** **`{ output, error }`** (same shape). **`output`** and **`error`** are passed through **`stripAnsi`** (`server/stripAnsi.js`) so ANSI color codes from Python tracebacks (and similar) do not appear in the UI. **`error`** may be non-empty on HTTP 200 (e.g. Python **`stderr`**, or JS exception after **`console`** capture).
+- **200:** **`{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }`**. **`output`** and **`error`** are passed through **`stripAnsi`** (`server/stripAnsi.js`). **`durationMs`** is wall-clock time for the run; **`timeoutMs`** is the configured limit (**`RUN_VM_TIMEOUT_MS`** or **`RUN_PYTHON_TIMEOUT_MS`**). **`runStatus`**: **`ok`** \| **`error`** \| **`timeout`**. **`errorLabel`** is a short UI bucket when **`error`** is set: **Timeout**, **Recursion limit**, **Syntax error**, **Runtime error**, etc. (`server/runMeta.js`). **`error`** may be non-empty on HTTP 200 (e.g. Python **`stderr`**, or JS exception after **`console`** capture).
 - **`environment: "js"`** (default): **`executeJavaScript`** in **`runCode.js`** — unchanged **`vm2`** sandbox (stub **`console`** only; **`eval`**, **`wasm`**, async disabled; **`RUN_TIMEOUT_MS`** from **`RUN_VM_TIMEOUT_MS`**).
 - **`environment: "python"`**: **`executePython`** in **`runPython.js`** — subprocess (**`-I -u -`**, script on stdin). **Not** a JS-class sandbox.
 - **400 / 500:** Same JSON **`{ output, error }`** shapes as today where applicable.
@@ -251,6 +252,7 @@ sequenceDiagram
 │   ├── runCode.js
 │   ├── runPython.js
 │   ├── formatPython.js
+│   ├── runMeta.js
 │   ├── stripAnsi.js
 │   ├── scripts/
 │   │   └── test-strip-ansi.mjs
@@ -337,7 +339,7 @@ Output: **`client/dist/`**, including **`monacoeditorwork/`** for workers — de
 | `POST /chat` 400 “files” | Invalid `files` / `currentFile` or non-`*.js` keys |
 | `POST /chat` 502 / “Agent mode: expected…” | **Agent** mode: model output was not exactly one valid **`edit_file`** / **`create_file`** JSON object |
 | `POST /run` 400 | Bad **`code`** type, over max length, or malformed JSON |
-| `POST /run` timeout / killed | **JS:** exceeded **`RUN_TIMEOUT_MS`** — shorten work or raise **`RUN_VM_TIMEOUT_MS`** and restart. **Python:** exceeded **`RUN_PYTHON_TIMEOUT_MS`** (or VM fallback) — same idea. |
+| `POST /run` timeout / killed | Output shows **Timed out at N ms** and **Timeout** label. **JS:** raise **`RUN_VM_TIMEOUT_MS`** and restart server. **Python:** **`RUN_PYTHON_TIMEOUT_MS`**. |
 | `POST /run` async / eval issues (**JS** only) | **`allowAsync: false`**, **`eval: false`** — use simple synchronous scripts |
 | `POST /run` “Python not found” | **Python** runtime: interpreter missing or wrong **`PYTHON_BIN`** |
 | Format toast “Black not found” | On the server host: `py -m pip install black` (or `pip install black`). Restart **`npm run dev`**. Optional **`BLACK_BIN=py -m black`** in **`server/.env`** |
@@ -361,7 +363,7 @@ When requesting changes, specify: **which side** (`server` / `client` / both), *
 | Chat / Gemini | `server/services/geminiService.js`, `assistantOutput.js`, `chatBody.js`, `ChatPanel.jsx`, `App.jsx` |
 | Workspace paths / validation | `workspaceFilename.js`, `workspaceFileValidation.js` (client + server), `FileExplorer.jsx`, `App.jsx` |
 | Browser workspace persistence | `workspaceStorage.js`, `App.jsx` (persist effect, **Reset**), `App.css` (reset button) |
-| Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/stripAnsi.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
+| Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/runMeta.js`, `server/stripAnsi.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
 | Format (Prettier + Black) | `client/src/formatJavaScript.js`, `server/formatPython.js`, `server/index.js` (`POST /format`), `App.jsx`, `vite.config.js` |
 | UI / Monaco | `App.css`, `index.css`, `CodeEditor.jsx`, `vite.config.js`, `index.html`, `public/favicon.svg` |
 

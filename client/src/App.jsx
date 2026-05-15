@@ -75,6 +75,8 @@ export default function App() {
   const [exportZipPending, setExportZipPending] = useState(false);
   const [runOutput, setRunOutput] = useState("");
   const [runError, setRunError] = useState("");
+  const [runErrorLabel, setRunErrorLabel] = useState(null);
+  const [runMeta, setRunMeta] = useState(null);
   const [runPending, setRunPending] = useState(false);
   const [formatPending, setFormatPending] = useState(false);
   const [runOutputMinimized, setRunOutputMinimized] = useState(false);
@@ -184,6 +186,8 @@ export default function App() {
     setAiEditPreview(null);
     setRunOutput("");
     setRunError("");
+    setRunErrorLabel(null);
+    setRunMeta(null);
     setRunOutputMinimized(false);
   }, [bumpHistoryUi, resetManualEditGroup]);
 
@@ -214,6 +218,8 @@ export default function App() {
   useEffect(() => {
     setRunOutput("");
     setRunError("");
+    setRunErrorLabel(null);
+    setRunMeta(null);
   }, [activePath, environment]);
 
   const handleRunCode = useCallback(async () => {
@@ -227,7 +233,9 @@ export default function App() {
     setRunPending(true);
     setRunOutputMinimized(false);
     setRunError("");
+    setRunErrorLabel(null);
     setRunOutput("");
+    setRunMeta(null);
     try {
       const res = await fetch("/run", {
         method: "POST",
@@ -241,18 +249,43 @@ export default function App() {
           data = JSON.parse(raw);
         } catch {
           setRunError(raw.slice(0, 400) || `HTTP ${res.status}`);
+          setRunErrorLabel("Error");
+          setRunMeta(null);
           return;
         }
       }
       const out = typeof data.output === "string" ? data.output : "";
       const err = typeof data.error === "string" ? data.error : "";
+      const durationMs = typeof data.durationMs === "number" ? data.durationMs : null;
+      const timeoutMs = typeof data.timeoutMs === "number" ? data.timeoutMs : null;
+      const runStatus =
+        data.runStatus === "timeout" || data.runStatus === "error" || data.runStatus === "ok"
+          ? data.runStatus
+          : err.trim()
+            ? "error"
+            : "ok";
+      const errorLabel =
+        typeof data.errorLabel === "string" && data.errorLabel.trim() ? data.errorLabel.trim() : null;
+
       setRunOutput(out);
       setRunError(err);
+      setRunErrorLabel(errorLabel);
+      setRunMeta(
+        durationMs !== null
+          ? { durationMs, timeoutMs, runStatus }
+          : err.trim()
+            ? { durationMs: 0, timeoutMs: null, runStatus: "error" }
+            : null,
+      );
       if (!res.ok && !err) {
         setRunError(typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`);
+        setRunErrorLabel("Error");
+        setRunMeta({ durationMs: 0, timeoutMs: null, runStatus: "error" });
       }
     } catch (e) {
       setRunError(e instanceof Error ? e.message : "Could not reach server");
+      setRunErrorLabel("Error");
+      setRunMeta(null);
     } finally {
       setRunPending(false);
     }
@@ -769,6 +802,29 @@ export default function App() {
             >
               <div className="run-output__head">
                 <span className="run-output__head-title">Output</span>
+                {runPending ? (
+                  <span className="run-output__status run-output__status--pending">Running…</span>
+                ) : runMeta ? (
+                  <span
+                    className={`run-output__status run-output__status--${runMeta.runStatus}`}
+                    title={
+                      runMeta.runStatus === "timeout" && runMeta.timeoutMs
+                        ? `Wall-clock limit ${runMeta.timeoutMs} ms`
+                        : "Wall-clock time for this run"
+                    }
+                  >
+                    {runMeta.runStatus === "timeout" && runMeta.timeoutMs
+                      ? `Timed out at ${runMeta.timeoutMs} ms`
+                      : `Completed in ${runMeta.durationMs} ms`}
+                  </span>
+                ) : null}
+                {runErrorLabel && !runPending ? (
+                  <span
+                    className={`run-output__error-tag run-output__error-tag--${runMeta?.runStatus === "timeout" ? "timeout" : "error"}`}
+                  >
+                    {runErrorLabel}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className="run-output__min-btn"
@@ -785,7 +841,6 @@ export default function App() {
               </div>
               {!runOutputMinimized ? (
                 <div className="run-output__body-wrap">
-                  {runPending && <p className="run-output__placeholder">Running…</p>}
                   {!runPending && !runOutput && !runError && (
                     <p className="run-output__placeholder">
                       {environment === "python"
@@ -794,7 +849,19 @@ export default function App() {
                     </p>
                   )}
                   {runError ? (
-                    <pre className="run-output__pre run-output__pre--error">{runError}</pre>
+                    <div className="run-output__error-block">
+                      {runErrorLabel ? (
+                        <p className="run-output__error-kind" id="run-output-error-label">
+                          {runErrorLabel}
+                        </p>
+                      ) : null}
+                      <pre
+                        className="run-output__pre run-output__pre--error"
+                        aria-labelledby={runErrorLabel ? "run-output-error-label" : undefined}
+                      >
+                        {runError}
+                      </pre>
+                    </div>
                   ) : null}
                   {runOutput ? <pre className="run-output__pre run-output__pre--out">{runOutput}</pre> : null}
                 </div>

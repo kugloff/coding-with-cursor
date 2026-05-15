@@ -11,6 +11,7 @@ import { normalizeChatMode, normalizeChatEnvironment, parseChatContext } from ".
 import { executeJavaScript, MAX_RUN_CODE_CHARS } from "./runCode.js";
 import { executePython } from "./runPython.js";
 import { formatPythonWithBlack } from "./formatPython.js";
+import { buildRunResponse } from "./runMeta.js";
 
 /**
  * POST /run execution target: prefers `environment`, falls back to legacy `runtime`.
@@ -178,18 +179,28 @@ app.post("/run", (req, res) => {
   }
 
   try {
+    const t0 = performance.now();
     const { output, error } =
       environment === "python" ? executePython(code) : executeJavaScript(code);
-    return res.json({
-      output: typeof output === "string" ? output : String(output ?? ""),
-      error: typeof error === "string" ? error : String(error ?? ""),
-    });
+    const durationMs = performance.now() - t0;
+    return res.json(
+      buildRunResponse({
+        output: typeof output === "string" ? output : String(output ?? ""),
+        error: typeof error === "string" ? error : String(error ?? ""),
+        environment,
+        durationMs,
+      }),
+    );
   } catch (err) {
     console.error("POST /run unexpected error:", err);
-    return res.status(500).json({
-      output: "",
-      error: "Internal error while executing code.",
-    });
+    return res.status(500).json(
+      buildRunResponse({
+        output: "",
+        error: "Internal error while executing code.",
+        environment,
+        durationMs: 0,
+      }),
+    );
   }
 });
 
