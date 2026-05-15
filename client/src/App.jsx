@@ -316,7 +316,7 @@ export default function App() {
 
     try {
       let formatted;
-      if (env === "js") {
+      if (meta.formatInBrowser) {
         formatted = await formatJavaScript(code);
       } else {
         const res = await fetch("/format", {
@@ -362,9 +362,7 @@ export default function App() {
           files: { ...dw[env].files, [ap]: formatted },
         },
       }));
-      const formatTool =
-        env === "js" ? "Prettier" : env === "csharp" ? "CSharpier" : "Black";
-      showToast(`Formatted with ${formatTool}`);
+      showToast(`Formatted with ${meta.formatTool}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Format failed";
       showToast(msg);
@@ -778,11 +776,7 @@ export default function App() {
                     ? `Open a ${envMeta.ext} file to format`
                     : !envMeta.formatSupported
                       ? `Format is not available for ${envMeta.lang} yet`
-                      : environment === "python"
-                        ? "Format with Black (local subprocess; pip install black)"
-                        : environment === "csharp"
-                          ? "Format with CSharpier (dotnet tool install -g csharpier on the server host)"
-                          : "Format with Prettier (in browser)"
+                      : envMeta.formatTitle
                 }
               >
                 <Wand2 size={14} strokeWidth={2} aria-hidden />
@@ -798,9 +792,7 @@ export default function App() {
                     ? `Open a ${envMeta.ext} file to run`
                     : !envMeta.runSupported
                       ? `Run is not available for ${envMeta.lang} yet`
-                      : environment === "python"
-                        ? "Run active file as Python on the server (subprocess; treat as untrusted)"
-                        : "Run active file as JavaScript on the server (vm2 sandbox)"
+                      : envMeta.runTitle
                 }
               >
                 <Play size={14} strokeWidth={2} aria-hidden />
@@ -867,11 +859,7 @@ export default function App() {
                 <div className="run-output__body-wrap">
                   {!runPending && !runOutput && !runError && (
                     <p className="run-output__placeholder">
-                      {envMeta.runSupported
-                        ? environment === "python"
-                          ? "Run sends the active .py tab to the server; stdout and stderr appear below."
-                          : "Run sends the active .js file as JavaScript; captured console output appears below."
-                        : `Run is not available for ${envMeta.lang} yet.`}
+                      {envMeta.runSupported ? envMeta.runPlaceholder : `Run is not available for ${envMeta.lang} yet.`}
                     </p>
                   )}
                   {runError ? (

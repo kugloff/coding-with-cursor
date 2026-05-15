@@ -18,7 +18,7 @@ export function normalizeChatMode(mode) {
 
 /**
  * @param {unknown} raw
- * @returns {"js" | "python"}
+ * @returns {import("../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId}
  */
 export function normalizeChatEnvironment(raw) {
   return normalizeWorkspaceEnvironment(raw);
@@ -30,7 +30,7 @@ export { resolveTranslationTarget };
  * Validates optional `files` and `currentFile` from POST /chat JSON body.
  * @param {unknown} files
  * @param {unknown} currentFile
- * @param {"js" | "python"} [environment]
+ * @param {import("../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  * @returns {{ ok: true, files?: Record<string, string>, currentFile?: string | null } | { ok: false, detail: string }}
  */
 export function parseChatContext(files, currentFile, environment = "js") {

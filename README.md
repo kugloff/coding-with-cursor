@@ -6,7 +6,7 @@ For implementation history and changes, see: agent-memory.md
 
 # Workspace documentation
 
-Browser-based **multi-language workspace** (top bar **JavaScript** / **Python** / **C#**): each environment has its own in-memory files (**`*.js`**, **`*.py`**, or **`*.cs`**), Monaco editor, undo/redo, and AI chat context. **Run** is available for JS and Python only; **Format** uses **Prettier** (JS), **Black** (Python), and **CSharpier** (C#). **Google Gemini** chat supports **Chat**, **Agent**, and **Translate**. Stack: **Express** (`server/`) + **Vite + React 19** (`client/`).
+Browser-based **multi-language workspace** (top bar **JavaScript** / **Python** / **C#**): each environment has its own in-memory files (**`*.js`**, **`*.py`**, or **`*.cs`**), Monaco editor, undo/redo, and AI chat context. **Run** uses **vm2** (JS), a Python subprocess, or **`dotnet run`** (C#). **Format** uses **Prettier**, **Black**, and **CSharpier**. **Google Gemini** chat supports **Chat**, **Agent**, and **Translate**. Stack: **Express** (`server/`) + **Vite + React 19** (`client/`).
 
 **Implementation history (append-only, factual):** [`agent-memory.md`](./agent-memory.md) — update **this** file when **behavior or spec** changes; append **`agent-memory.md`** only for **code** changes; do not duplicate the same detail in both (prefer **`agent-memory.md`** for implementation detail when unsure).
 
@@ -42,7 +42,7 @@ Browser-based **multi-language workspace** (top bar **JavaScript** / **Python** 
 - **Export:** Top bar **Export ZIP** downloads **`javascript/`**, **`python/`**, and **`csharp/`** folders (all tabs in every workspace) plus **`README.txt`**, built in the browser via **`jszip`**.
 - **Copy:** **Copy code** — raw file source (paste into an editor). **Copy snippet** — gist-style Markdown (`### filename` + fenced code block) for issues/chat. Per-file copy is via the explorer context menu (right-click) or the active tab’s editor header (**Copy code** / **Copy snippet**). Rename and delete stay as row icons in the explorer (and in the context menu).
 - **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat**, **Agent**, or **Translate**). File keys must match the **source** workspace extension (e.g. **`*.cs`** for C#). **Agent** edits stay in that environment; **Translate** writes to another registered language (see §4.3).
-- **Run:** **`POST /run`** supports **`"js"`** and **`"python"`** only (`runSupported` in the registry). **C#** returns **400** if requested. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.4).
+- **Run:** **`POST /run`** with **`environment`** **`"js"`**, **`"python"`**, or **`"csharp"`**. JS uses **`vm2`**; Python uses **`runPython.js`**; C# uses **`runCsharp.js`** (temp console project + **`dotnet run`**). C# runs are slower (compile each time). See §5.4.
 - **Format:** **Prettier** (browser) for **`.js`**; **Black** (server) for **`.py`**; **CSharpier** (server) for **`.cs`** (`dotnet tool install -g csharpier` on the host running Express). See §5.3.
 
 **Gemini:** `@google/generative-ai`, API key: **`GEMINI_API_KEY`**. Chat calls **`generateContent`** with automatic model fallback in **`GEMINI_MODEL_FALLBACK_CHAIN`** (`server/services/geminiService.js`): **`gemini-2.5-flash`** → **`gemini-2.5-flash-lite`** → **`gemini-3-flash-preview`** → **`gemini-3.1-flash-lite`** → **`gemini-2.5-pro`**. On recoverable failures (e.g. model unavailable, 429, 5xx, empty reply), the server tries the next model; **401/403** and **400** do not advance the chain. Prompts use compact section tags; file bodies still respect **`MAX_CONTEXT_CHARS`** / **`MAX_FILE_CHARS`**.
@@ -51,7 +51,7 @@ Browser-based **multi-language workspace** (top bar **JavaScript** / **Python** 
 
 ## 2. Quick start
 
-**Prerequisites:** Node.js **18+** recommended. **Optional:** Python **3** installed and on **`PATH`** (or **`PYTHON_BIN`** set) if you use the **Python** Run runtime.
+**Prerequisites:** Node.js **18+** recommended. **Optional:** Python **3** on **`PATH`** for Python Run/format; **[.NET SDK](https://dotnet.microsoft.com/download)** for C# Run/format (`dotnet` on PATH).
 
 From the **repository root**:
 
@@ -105,7 +105,7 @@ Each language is configured in **`shared/workspaceEnvironments.js`** (extension,
 
 - **JavaScript (`*.js`):** e.g. `main.js`, `untitled-1.js`. New files start empty. Rename uses a fixed **`.js`** suffix in the UI.
 - **Python (`*.py`):** e.g. `main.py`, `untitled-1.py`. Same rules with **`.py`**.
-- **C# (`*.cs`):** e.g. `main.cs`, `untitled-1.cs`. Monaco **csharp** highlighting; **Format** via CSharpier; **no Run** yet. Otherwise same explorer, AI, copy, export, and translate rules as other languages.
+- **C# (`*.cs`):** e.g. `main.cs`, `untitled-1.cs`. Monaco **csharp** highlighting; **Format** (CSharpier) and **Run** (`dotnet run` on a temp project). Source must be a **compilable program** (e.g. `class Program` with `Main`). Same explorer, AI, copy, export, and translate rules as other languages.
 - Workspaces **do not share** `files` or `activePath`. Switching the top bar swaps editor + explorer context. **Chat** threads reset when you switch (in-memory per visit).
 - **Delete:** You cannot delete the **last** file in an environment.
 - **Adding a language:** Add an entry to **`WORKSPACE_ENVIRONMENTS`** and default files in **`workspaceStorage.js`**; most UI and translate wiring follows the registry.
@@ -115,7 +115,7 @@ Each language is configured in **`shared/workspaceEnvironments.js`** (extension,
 - Monaco language follows the **active environment** (JavaScript, Python, or C#). The editor header shows the active filename, language badge, **Copy code**, **Copy snippet**, **Format**, and **Run** (disabled when not supported for that language).
 - **Format document:** **`.js`** — **Prettier** in the browser (`client/src/formatJavaScript.js`). **`.py`** and **`.cs`** — **`POST /format`** with matching **`environment`**; the server runs **Black** or **CSharpier** on stdin. Formatted text replaces the active tab and is undoable.
 - **Export ZIP:** **Export ZIP** in the top bar saves both workspace slices (not only the active environment). Filenames are timestamped (`llm-workspace-YYYYMMDD-HHMM.zip`).
-- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). The Output header shows **Completed in … ms** or **Timed out at … ms**; errors get a short label (**Syntax error**, **Recursion limit**, **Timeout**, etc.) plus the raw message. Output semantics are unchanged from §5.4 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
+- **Run** sends the active tab with matching **`environment`**. The Output header shows **Completed in … ms** or **Timed out at … ms**; errors get short labels (**Syntax error**, **Timeout**, etc.). JS: **`console.*`**; Python: **stdout** / **stderr**; C#: **stdout** plus build errors in **error**. ANSI stripped from **`output`** / **`error`** (see §4.5). C# is slower (compile per run).
 
 ### 4.3 AI chat and file proposals
 
@@ -123,7 +123,7 @@ Each language is configured in **`shared/workspaceEnvironments.js`** (extension,
 - **Chat mode:** The server never parses or applies tool JSON; replies are natural language (Markdown allowed). The client ignores any **`toolCall`** unless **`mode`** and **`environment`** from the server match the request.
 - **Agent mode:** The model returns **`edit_file`** or **`create_file`** JSON with a filename valid for the **current** environment (e.g. **`.cs`** on C#). Valid payloads open **`AiEditPreviewModal`**. **Accept** updates only that environment’s `files` / `activePath`.
 - **Translate mode:** Ports the **active file** to another registered language. The **To** switch lists only **other** languages (e.g. JS → Python or C#). Output names use a **`_converted`** suffix (e.g. `main.js` → `main_converted.cs`). **Accept** writes to the target workspace and switches the top bar there.
-- **Adding languages later:** Register entries in **`shared/workspaceEnvironments.js`**; translation targets and filename rules follow automatically.
+- **Adding languages later:** Register entries in **`shared/workspaceEnvironments.js`**; translation targets, filename rules, and chat Agent/Translate prompts follow via **`normalizeWorkspaceEnvironment`** (server + client).
 - Composer sends **`message`**, **`files`**, **`currentFile`**, **`mode`**, and **`environment`** to **`POST /chat`** (plus translate fields when applicable). A small footer above the composer shows **which model answered** the last reply, highlights it in the fallback chain, and marks **fallback** when a later model was used after an earlier failure.
 
 ### 4.5 Testing Run output (ANSI cleanup)
@@ -134,6 +134,7 @@ Each language is configured in **`shared/workspaceEnvironments.js`** (extension,
 cd server
 npm run test:strip-ansi
 npm run test:run-error-kind
+npm run test:run-csharp
 ```
 
 **Manual in the UI (Python — typical colored tracebacks):**
@@ -234,11 +235,12 @@ sequenceDiagram
 ### 5.4 `POST /run`
 
 - **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
-- **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** (default **`"js"`**). Legacy **`runtime`** is read if **`environment`** is omitted (same normalization). Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
-- **200:** **`{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }`**. **`output`** and **`error`** are passed through **`stripAnsi`** (`server/stripAnsi.js`). **`durationMs`** is wall-clock time for the run; **`timeoutMs`** is the configured limit (**`RUN_VM_TIMEOUT_MS`** or **`RUN_PYTHON_TIMEOUT_MS`**). **`runStatus`**: **`ok`** \| **`error`** \| **`timeout`**. **`errorLabel`** is a short UI bucket when **`error`** is set: **Timeout**, **Recursion limit**, **Syntax error**, **Runtime error**, etc. (`server/runMeta.js`). **`error`** may be non-empty on HTTP 200 (e.g. Python **`stderr`**, or JS exception after **`console`** capture).
-- **`environment: "js"`** (default): **`executeJavaScript`** in **`runCode.js`** — unchanged **`vm2`** sandbox (stub **`console`** only; **`eval`**, **`wasm`**, async disabled; **`RUN_TIMEOUT_MS`** from **`RUN_VM_TIMEOUT_MS`**).
-- **`environment: "python"`**: **`executePython`** in **`runPython.js`** — subprocess (**`-I -u -`**, script on stdin). **Not** a JS-class sandbox.
-- **400 / 500:** Same JSON **`{ output, error }`** shapes as today where applicable.
+- **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** \| **`"csharp"`** (default **`"js"`**). Legacy **`runtime`** is accepted. Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
+- **200:** **`{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }`**. **`output`** and **`error`** are passed through **`stripAnsi`**. **`timeoutMs`**: **`RUN_VM_TIMEOUT_MS`** (JS), **`RUN_PYTHON_TIMEOUT_MS`** (Python), **`RUN_CSHARP_TIMEOUT_MS`** (C#, default **30000**). **`errorLabel`** buckets include **Syntax error** (e.g. C# **CS####** build errors).
+- **`environment: "js"`** (default): **`executeJavaScript`** — **`vm2`** sandbox.
+- **`environment: "python"`**: **`executePython`** — Python subprocess on stdin.
+- **`environment: "csharp"`**: **`executeCsharp`** — temp **`RunSnippet.csproj`** + **`Program.cs`**, then **`dotnet run`**. Requires a compilable console program. **`DOTNET_TFM`** (default **`net8.0`**), **`DOTNET_BIN`**, **`RUN_CSHARP_TIMEOUT_MS`**.
+- **400 / 500:** Same JSON shapes; **400** if **`runSupported`** is false for that language.
 
 ---
 
@@ -261,6 +263,7 @@ sequenceDiagram
 │   ├── workspaceFileValidation.js
 │   ├── runCode.js
 │   ├── runPython.js
+│   ├── runCsharp.js
 │   ├── formatPython.js
 │   ├── formatCsharp.js
 │   ├── runMeta.js
@@ -356,6 +359,8 @@ Output: **`client/dist/`**, including **`monacoeditorwork/`** for workers — de
 | `POST /run` “Python not found” | **Python** runtime: interpreter missing or wrong **`PYTHON_BIN`** |
 | Format toast “Black not found” | On the server host: `py -m pip install black` (or `pip install black`). Restart **`npm run dev`**. Optional **`BLACK_BIN=py -m black`** in **`server/.env`** |
 | Format toast “CSharpier is not available” | Install [.NET SDK](https://dotnet.microsoft.com/download), then `dotnet tool install -g csharpier`. Restart **`npm run dev`**. Optional **`CSHARPIER_BIN`** in **`server/.env`** |
+| C# Run slow or times out | Normal (compile each run). Raise **`RUN_CSHARP_TIMEOUT_MS`** (e.g. **60000**) in **`server/.env`**. Ensure **`Program.cs`** is a valid console app with **`Main`**. |
+| C# Run “dotnet not found” | Install [.NET SDK](https://dotnet.microsoft.com/download). Restart **`npm run dev`**. Optional **`DOTNET_BIN`** |
 | Run disabled | No active `.js` tab |
 | Rename blocked | Invalid base name, separators, or duplicate after normalization |
 | Output “gone” | Output panel minimized — expand via chevron or Run |

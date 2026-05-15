@@ -3,6 +3,8 @@ import { AlertCircle, ArrowUp, Languages, Sparkles, User } from "lucide-react";
 import {
   buildConvertedFilename,
   getTranslationTargets,
+  normalizeWorkspaceEnvironment,
+  normalizeWorkspaceEnvironmentOrNull,
   WORKSPACE_ENVIRONMENTS,
 } from "@shared/workspaceEnvironments.js";
 import { isValidWorkspaceFilename } from "@shared/workspaceFilename.js";
@@ -22,7 +24,9 @@ export default function ChatPanel({
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState("chat");
-  const [translateTarget, setTranslateTarget] = useState(() => getTranslationTargets(environment)[0]?.id ?? "python");
+  const [translateTarget, setTranslateTarget] = useState(
+    () => getTranslationTargets(environment)[0]?.id ?? "js",
+  );
   const [pending, setPending] = useState(false);
   const [lastModelInfo, setLastModelInfo] = useState(null);
   const listRef = useRef(null);
@@ -123,19 +127,21 @@ export default function ChatPanel({
 
       const serverMode =
         data.mode === "translate" ? "translate" : data.mode === "agent" ? "agent" : "chat";
-      const serverEnvironment = data.environment === "python" ? "python" : "js";
-      const serverTarget =
-        data.targetEnvironment === "python" ? "python" : data.targetEnvironment === "js" ? "js" : null;
+      const serverEnvironment = normalizeWorkspaceEnvironment(data.environment);
+      const serverTarget = normalizeWorkspaceEnvironmentOrNull(data.targetEnvironment);
+      const clientEnvironment = normalizeWorkspaceEnvironment(environment);
+      const clientTranslateTarget = normalizeWorkspaceEnvironment(translateTarget);
 
-      const allowAgentTools = serverMode === "agent" && serverEnvironment === environment;
+      const allowAgentTools = serverMode === "agent" && serverEnvironment === clientEnvironment;
       const allowTranslateTools =
         serverMode === "translate" &&
-        serverEnvironment === environment &&
-        serverTarget === translateTarget &&
-        serverTarget !== environment;
+        serverEnvironment === clientEnvironment &&
+        serverTarget !== null &&
+        serverTarget === clientTranslateTarget &&
+        serverTarget !== clientEnvironment;
 
       const allowStructuredTools = allowAgentTools || allowTranslateTools;
-      const toolEnv = allowTranslateTools ? serverTarget : environment;
+      const toolEnv = allowTranslateTools ? serverTarget : clientEnvironment;
       const validToolName = validToolNameChecker(toolEnv);
 
       const tool = data.toolCall;

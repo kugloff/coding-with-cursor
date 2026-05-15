@@ -53,7 +53,7 @@ function isValidToolWorkspaceName(name, environment) {
 
 /**
  * @param {string} raw Model output (trimmed or not)
- * @param {"js" | "python"} [environment]
+ * @param {import("../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} [environment]
  * @returns {{ response: string, toolCall: null } | { response: string, toolCall: { action: string, filename: string, content: string } }}
  */
 export function parseAssistantModelOutput(raw, environment = "js") {

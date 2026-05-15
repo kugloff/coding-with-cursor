@@ -1,5 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { WORKSPACE_ENVIRONMENTS } from "../../shared/workspaceEnvironments.js";
+import {
+  normalizeWorkspaceEnvironment,
+  WORKSPACE_ENVIRONMENTS,
+} from "../../shared/workspaceEnvironments.js";
 import { parseAssistantModelOutput } from "../assistantOutput.js";
 
 /** Try in order; last entry is the final fallback. */
@@ -13,16 +16,16 @@ export const GEMINI_MODEL_FALLBACK_CHAIN = [
 
 /**
  * @param {"chat" | "agent" | "translate"} mode
- * @param {"js" | "python"} environment
- * @param {{ targetEnvironment?: "js" | "python", expectedFilename?: string, sourceFile?: string | null }} [translateOpts]
+ * @param {import("../../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} environment
+ * @param {{ targetEnvironment?: import("../../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId, expectedFilename?: string, sourceFile?: string | null }} [translateOpts]
  */
 function rulesForModeAndEnvironment(mode, environment, translateOpts = {}) {
-  const env = environment === "python" ? "python" : "js";
+  const env = normalizeWorkspaceEnvironment(environment);
   const { ext, lang } = WORKSPACE_ENVIRONMENTS[env];
   const extNoDot = ext.slice(1);
 
   if (mode === "translate") {
-    const targetEnv = translateOpts.targetEnvironment === "python" ? "python" : "js";
+    const targetEnv = normalizeWorkspaceEnvironment(translateOpts.targetEnvironment);
     const target = WORKSPACE_ENVIRONMENTS[targetEnv];
     const sourcePath = translateOpts.sourceFile?.trim() || "(active)";
     const expected = translateOpts.expectedFilename?.trim() || `name${target.ext}`;
@@ -110,12 +113,12 @@ function appendFileBody(parts, raw, budget) {
  * @param {Record<string, string>} files
  * @param {string | null | undefined} currentFile
  * @param {"chat" | "agent" | "translate"} mode
- * @param {"js" | "python"} environment
- * @param {{ targetEnvironment?: "js" | "python", expectedFilename?: string, sourceFile?: string | null }} [translateOpts]
+ * @param {import("../../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId} environment
+ * @param {{ targetEnvironment?: import("../../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId, expectedFilename?: string, sourceFile?: string | null }} [translateOpts]
  * @returns {string}
  */
 function buildPromptWithFileContext(message, files, currentFile, mode, environment, translateOpts = {}) {
-  const env = environment === "python" ? "python" : "js";
+  const env = normalizeWorkspaceEnvironment(environment);
   const fileMap = files && typeof files === "object" && !Array.isArray(files) ? files : {};
   const pathsSorted = Object.keys(fileMap)
     .filter((p) => typeof fileMap[p] === "string")
@@ -125,9 +128,10 @@ function buildPromptWithFileContext(message, files, currentFile, mode, environme
     typeof currentFile === "string" && currentFile.trim() ? currentFile.trim() : null;
 
   const { lang } = WORKSPACE_ENVIRONMENTS[env];
+  const targetEnvId = normalizeWorkspaceEnvironment(translateOpts.targetEnvironment);
   const intro =
     mode === "translate"
-      ? `${lang} → ${WORKSPACE_ENVIRONMENTS[translateOpts.targetEnvironment === "python" ? "python" : "js"].lang} translate — one create_file or edit_file JSON for the target workspace (rules at end).`
+      ? `${lang} → ${WORKSPACE_ENVIRONMENTS[targetEnvId].lang} translate — one create_file or edit_file JSON for the target workspace (rules at end).`
       : mode === "agent"
         ? `${lang} workspace agent — one edit_file or create_file JSON (rules at end).`
         : `${lang} workspace assistant — chat only (rules at end).`;
@@ -164,7 +168,7 @@ function buildPromptWithFileContext(message, files, currentFile, mode, environme
   if (mode === "translate") {
     parts.push(
       "[translate-target]",
-      WORKSPACE_ENVIRONMENTS[translateOpts.targetEnvironment === "python" ? "python" : "js"].lang,
+      WORKSPACE_ENVIRONMENTS[targetEnvId].lang,
       "[output-filename]",
       translateOpts.expectedFilename?.trim() || "",
       "",
@@ -177,7 +181,7 @@ function buildPromptWithFileContext(message, files, currentFile, mode, environme
 
 /**
  * Calls Google Gemini with optional workspace file context.
- * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null, mode?: "chat" | "agent" | "translate", environment?: "js" | "python", targetEnvironment?: "js" | "python", expectedFilename?: string }} input
+ * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null, mode?: "chat" | "agent" | "translate", environment?: import("../../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId, targetEnvironment?: import("../../shared/workspaceEnvironments.types.js").WorkspaceEnvironmentId, expectedFilename?: string }} input
  *   `environment` is the **source** workspace for translate; tool JSON is validated against **`targetEnvironment`**.
  * @returns {Promise<{ response: string, toolCall: null | { action: "edit_file" | "create_file", filename: string, content: string }, modelId: string, modelFallback: boolean }>}
  */
@@ -198,8 +202,8 @@ export async function generateResponse({
   }
 
   const modeNorm = mode === "agent" ? "agent" : mode === "translate" ? "translate" : "chat";
-  const envNorm = environment === "python" ? "python" : "js";
-  const targetNorm = targetEnvironment === "python" ? "python" : "js";
+  const envNorm = normalizeWorkspaceEnvironment(environment);
+  const targetNorm = normalizeWorkspaceEnvironment(targetEnvironment);
   const translateOpts =
     modeNorm === "translate"
       ? {

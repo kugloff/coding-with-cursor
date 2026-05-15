@@ -1,4 +1,5 @@
 import { RUN_TIMEOUT_MS } from "./runCode.js";
+import { resolveCsharpRunTimeoutMs } from "./runCsharp.js";
 
 /** @typedef {"timeout" | "recursion" | "syntax" | "runtime" | "config" | "other"} RunErrorKind */
 /** @typedef {"ok" | "error" | "timeout"} RunStatus */
@@ -21,15 +22,17 @@ function resolvePythonTimeoutMs() {
 }
 
 /**
- * @param {"js" | "python"} environment
+ * @param {"js" | "python" | "csharp"} environment
  */
 export function timeoutMsForRunEnvironment(environment) {
-  return environment === "python" ? resolvePythonTimeoutMs() : RUN_TIMEOUT_MS;
+  if (environment === "python") return resolvePythonTimeoutMs();
+  if (environment === "csharp") return resolveCsharpRunTimeoutMs();
+  return RUN_TIMEOUT_MS;
 }
 
 /**
  * @param {string} error
- * @param {"js" | "python"} environment
+ * @param {"js" | "python" | "csharp"} environment
  * @returns {RunErrorKind | null}
  */
 export function classifyRunError(error, environment) {
@@ -38,7 +41,7 @@ export function classifyRunError(error, environment) {
   const lower = error.toLowerCase();
 
   if (
-    /timed out|timeout after|execution timed out|etimedout|script execution timed out/i.test(
+    /timed out|timeout after|execution timed out|etimedout|script execution timed out|c# execution timed out/i.test(
       error,
     )
   ) {
@@ -55,6 +58,8 @@ export function classifyRunError(error, environment) {
 
   if (environment === "python") {
     if (/syntaxerror|indentationerror|taberror/.test(lower)) return "syntax";
+  } else if (environment === "csharp") {
+    if (/error cs\d{4}|: error cs\d{4}/i.test(error)) return "syntax";
   } else if (/syntaxerror|unexpected token|unexpected identifier|invalid or unexpected token/.test(lower)) {
     return "syntax";
   }
@@ -63,11 +68,15 @@ export function classifyRunError(error, environment) {
     return "config";
   }
 
+  if (environment === "csharp" && /dotnet not found/.test(lower)) {
+    return "config";
+  }
+
   return "runtime";
 }
 
 /**
- * @param {{ output: string, error: string, environment: "js" | "python", durationMs: number }} params
+ * @param {{ output: string, error: string, environment: "js" | "python" | "csharp", durationMs: number }} params
  */
 export function buildRunResponse({ output, error, environment, durationMs }) {
   const timeoutMs = timeoutMsForRunEnvironment(environment);

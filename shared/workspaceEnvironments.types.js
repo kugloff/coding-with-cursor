@@ -10,6 +10,11 @@
  * @property {string} gistLang
  * @property {boolean} runSupported
  * @property {boolean} formatSupported
+ * @property {boolean} formatInBrowser
+ * @property {string} formatTool
+ * @property {string} formatTitle
+ * @property {string} runTitle
+ * @property {string} runPlaceholder
  */
 
 export {};

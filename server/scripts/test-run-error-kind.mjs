@@ -8,6 +8,8 @@ assert.equal(
 );
 assert.equal(classifyRunError("  File \"<stdin>\", line 1\n    SyntaxError: invalid syntax", "python"), "syntax");
 assert.equal(classifyRunError("ReferenceError: x is not defined", "js"), "runtime");
+assert.equal(classifyRunError("Program.cs(3,1): error CS1002: ; expected", "csharp"), "syntax");
+assert.equal(classifyRunError("dotnet not found (dotnet). Install the .NET SDK", "csharp"), "config");
 assert.equal(classifyRunError("", "js"), null);
 
 const r = buildRunResponse({

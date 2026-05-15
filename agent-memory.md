@@ -193,6 +193,24 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/App.jsx`**: removed **gist strip** bar under editor header (duplicate of **Copy snippet**); gist copy remains in explorer + header.
 - **`client/src/workspaceSnippet.js`**: removed unused **`gistSnippetPreviewLine`**.
 
+### 2026-05-15 — Chat env normalization (all languages incl. C# Agent/Translate)
+
+- **`shared/workspaceEnvironments.js`**: **`normalizeWorkspaceEnvironmentOrNull`**, **`workspaceMetaFor`**, aliases (`javascript`, `c#`, …), **`normalizeWorkspaceEnvironmentFromBody`**, per-env UI hints (`formatTitle`, `runTitle`, …).
+- **`server/services/geminiService.js`**: prompts and tool parsing use **`normalizeWorkspaceEnvironment`** for every registered id (fixes C# treated as JS).
+- **`client/src/components/ChatPanel.jsx`**: server **`environment`** / **`targetEnvironment`** matched via registry (Agent diff + Translate apply work on C#).
+- **`server/index.js`**: run/format dispatch via registry maps; API error text lists all registered ids.
+- **`npm run test:workspace-env`**: alias + body normalization smoke test.
+
+### 2026-05-15 — C# Run via dotnet run
+
+- **`server/runCsharp.js`** (new): **`executeCsharp`** — temp dir with **`Program.cs`** + **`RunSnippet.csproj`**, **`dotnet run --nologo`**; **`RUN_CSHARP_TIMEOUT_MS`** (default **30s**), **`DOTNET_TFM`** (default **net8.0**), **`DOTNET_BIN`**.
+- **`server/index.js`**: **`POST /run`** routes **`environment: "csharp"`** to **`executeCsharp`**.
+- **`server/runMeta.js`**: C# timeout + **CS####** syntax / **dotnet not found** classification.
+- **`shared/workspaceEnvironments.js`**: **`csharp.runSupported: true`**.
+- **`server/scripts/test-run-csharp.mjs`**, **`npm run test:run-csharp`**.
+- **`client/src/App.jsx`**: Run tooltips + output placeholder for C#.
+- **`server/.env.example`**, **`README.md`**.
+
 ### 2026-05-15 — C# format with CSharpier
 
 - **`server/formatCsharp.js`** (new): **`formatCsharpWithCSharpier`** — writes temp **`snippet.cs`**, runs **`csharpier format <path>`** (in-place; avoids Windows stdin-path bugs); tries **`csharpier`**, **`dotnet csharpier`**, **`dotnet tool run csharpier`**; **`CSHARPIER_BIN`**, **`FORMAT_CSHARP_TIMEOUT_MS`** env.
@@ -209,7 +227,7 @@ It must NOT describe intended features, only implemented changes.
 - **`client` / `server` `workspaceFilename.js`**, **`workspaceFileValidation.js`**: registry-driven validation; **C#** path rules.
 - **`client/src/App.jsx`**: top bar lists all languages from registry; Run/Format disabled per flags; export ZIP includes **csharp/**.
 - **`client/src/exportWorkspaceZip.js`**, **`workspaceSnippet.js`**, **`FileExplorer.jsx`**, **`ChatPanel.jsx`**: C#-aware.
-- **`server/index.js`**: **POST /run** and **POST /format** reject environments with **`runSupported`** / **`formatSupported`** false.
+- **`server/index.js`**: **POST /format** rejects unsupported format; **POST /run** rejects unsupported run (C# run added later).
 - **`README.md`**: multi-language overview, §4.1 C#, layout **shared/**.
 
 ### 2026-05-15 — Translate chat mode (cross-environment)
