@@ -149,7 +149,7 @@ function buildPromptWithFileContext(message, files, currentFile, mode, environme
  * Calls Google Gemini with optional workspace file context.
  * @param {{ message: string, files?: Record<string, string>, currentFile?: string | null, mode?: "chat" | "agent", environment?: "js" | "python" }} input
  *   `environment` selects JavaScript (`.js`) vs Python (`.py`) workspace rules and tool validation; default **`"js"`**.
- * @returns {Promise<{ response: string, toolCall: null | { action: "edit_file" | "create_file", filename: string, content: string } }>}
+ * @returns {Promise<{ response: string, toolCall: null | { action: "edit_file" | "create_file", filename: string, content: string }, modelId: string, modelFallback: boolean }>}
  */
 export async function generateResponse({ message, files, currentFile, mode = "chat", environment = "js" }) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -173,15 +173,17 @@ export async function generateResponse({ message, files, currentFile, mode = "ch
     : `${rulesForModeAndEnvironment(modeNorm, envNorm)}\n\n[user]\n${message.trim()}`;
 
   const genAI = new GoogleGenerativeAI(apiKey.trim());
-  const { text } = await generateContentWithModelFallback(genAI, prompt);
+  const { text, modelId } = await generateContentWithModelFallback(genAI, prompt);
+  const modelFallback = GEMINI_MODEL_FALLBACK_CHAIN.indexOf(modelId) > 0;
+  const modelMeta = { modelId, modelFallback };
 
   if (modeNorm === "chat") {
-    return { response: text.trim(), toolCall: null };
+    return { response: text.trim(), toolCall: null, ...modelMeta };
   }
 
   const parsed = parseAssistantModelOutput(text, envNorm);
   if (parsed.toolCall) {
-    return parsed;
+    return { ...parsed, ...modelMeta };
   }
   throw new GeminiApiError(
     "Agent mode: expected a single edit_file or create_file JSON object with no surrounding text."

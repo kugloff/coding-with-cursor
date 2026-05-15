@@ -42,7 +42,8 @@ Browser-based **dual-environment workspace** (top bar **JavaScript** vs **Python
 - **Export:** Top bar **Export ZIP** downloads **`javascript/`** and **`python/`** folders (all tabs in both workspaces) plus a short **`README.txt`**, built in the browser via **`jszip`**.
 - **Gist snippets:** Per-file **gist-style Markdown** (`### filename` + fenced code block) — copy from the editor header (**Copy snippet**), the strip above the editor, explorer row actions, or the file context menu.
 - **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat** vs **Agent**). Server validates **`files`** / **`currentFile`** keys as **`*.js`** or **`*.py`** accordingly; Gemini prompts and tool parsing are **environment-scoped** so the model must not emit cross-environment filenames.
-- **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.3).
+- **Run:** **Run** posts **`{ code, environment }`** where **`environment`** is **`"js"`** or **`"python"`** (default **`"js"`**). Legacy body field **`runtime`** is still accepted as a fallback. JS uses **`vm2`**; Python uses **`runPython.js`** (see §5.4).
+- **Format:** Editor **Format** — **Prettier** in the browser for **`.js`**; **Black** via server subprocess for **`.py`** (`py -m pip install black` on the host running Express). The server tries **`black`**, then **`py -m black`** / **`python -m black`** (and **`PYTHON_BIN -m black`** if set). Optional **`BLACK_BIN`** overrides (e.g. `py -m black`).
 
 **Gemini:** `@google/generative-ai`, API key: **`GEMINI_API_KEY`**. Chat calls **`generateContent`** with automatic model fallback in **`GEMINI_MODEL_FALLBACK_CHAIN`** (`server/services/geminiService.js`): **`gemini-2.5-flash`** → **`gemini-2.5-flash-lite`** → **`gemini-3-flash-preview`** → **`gemini-3.1-flash-lite`** → **`gemini-2.5-pro`**. On recoverable failures (e.g. model unavailable, 429, 5xx, empty reply), the server tries the next model; **401/403** and **400** do not advance the chain. Prompts use compact section tags; file bodies still respect **`MAX_CONTEXT_CHARS`** / **`MAX_FILE_CHARS`**.
 
@@ -107,17 +108,18 @@ Set variables in **`server/.env`** or the process environment. **`server/index.j
 
 ### 4.2 Editor, export, and Run
 
-- Monaco language follows the **active environment** and file extension (**JavaScript** or **Python**). The editor header shows the active filename, a small **JS** / **Python** badge, **Copy snippet**, and **Run**.
+- Monaco language follows the **active environment** and file extension (**JavaScript** or **Python**). The editor header shows the active filename, a small **JS** / **Python** badge, **Copy snippet**, **Format**, and **Run**.
+- **Format document:** **`.js`** tabs are formatted in the browser with **Prettier** (`client/src/formatJavaScript.js`). **`.py`** tabs call **`POST /format`** with **`environment: "python"`**; the server runs Black on stdin (`black -q -` or `py -m black -q -`, etc.). Formatted text replaces the active tab and is undoable.
 - **Gist strip:** A compact bar above the editor previews the fence line (e.g. ` ```javascript  main.js `) and offers **Copy** for the full Markdown block of the active tab.
 - **Export ZIP:** **Export ZIP** in the top bar saves both workspace slices (not only the active environment). Filenames are timestamped (`llm-workspace-YYYYMMDD-HHMM.zip`).
-- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). Output semantics are unchanged from §5.3 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
+- **Run** sends the active tab’s contents with **`environment`** **`"js"`** or **`"python"`** (same value as the workspace switch). Output semantics are unchanged from §5.4 (JS **`console.*`**, Python **stdout** / **stderr**). The API strips **ANSI escape sequences** (terminal color codes) from **`output`** and **`error`** before JSON so the Output panel shows plain text (see §4.5).
 
 ### 4.3 AI chat and file proposals
 
 - The chat panel has **Chat** and **Agent** modes (toggle in the header). Every request includes **`mode`**: **`"chat"`** (default) or **`"agent"`**, and **`environment`**: **`"js"`** (default) or **`"python"`** (must match the UI workspace).
 - **Chat mode:** The server never parses or applies tool JSON; replies are natural language (Markdown allowed). The client ignores any **`toolCall`** unless **`mode`** and **`environment`** from the server match the request.
 - **Agent mode:** The model must return a single valid **`edit_file`** or **`create_file`** JSON object with paths ending in **`.js`** (when **`environment`** is JS) or **`.py`** (when Python). Valid payloads open **`AiEditPreviewModal`**. **Accept** updates only the **current** environment’s `files` / `activePath`.
-- Composer sends **`message`**, **`files`**, **`currentFile`**, **`mode`**, and **`environment`** to **`POST /chat`**.
+- Composer sends **`message`**, **`files`**, **`currentFile`**, **`mode`**, and **`environment`** to **`POST /chat`**. A small footer above the composer shows **which model answered** the last reply, highlights it in the fallback chain, and marks **fallback** when a later model was used after an earlier failure.
 
 ### 4.5 Testing Run output (ANSI cleanup)
 
@@ -200,20 +202,28 @@ sequenceDiagram
 |--------|------|----------------------|
 | GET | `/api/health` | `{ ok, service, timestamp }` |
 | GET | `/api/hello` | `{ message }` |
-| POST | `/chat` | `{ response, toolCall, mode, environment }` — see §5.2 |
+| POST | `/chat` | `{ response, toolCall, mode, environment, model, modelFallback, modelChain }` — see §5.2 |
 | POST | `/run` | `{ output, error }` from **`code`** + **`environment`** (legacy **`runtime`** accepted) |
+| POST | `/format` | `{ code, error }` — Python only (**Black**); JS is formatted in the browser |
 
 ### 5.2 `POST /chat`
 
 - **URLs:** `http://localhost:5173/chat` (proxied) or `http://localhost:3001/chat`
 - **Headers:** `Content-Type: application/json` (body limit **4 MB**)
 - **Body:** `message` (string, required). Optional **`files`** (≤200 keys), **`currentFile`** (string \| null), **`mode`** (`"chat"` \| `"agent"`, default **`"chat"`**), **`environment`** (`"js"` \| `"python"`, default **`"js"`**). Keys in **`files`** and **`currentFile`** must match the environment: **`*.js`** when **`environment`** is JS, **`*.py`** when Python (`parseChatContext` + `workspaceFileValidation.js`).
-- **200:** `response`, `toolCall`, **`mode`**, and **`environment`** (each echoing normalized server values).
+- **200:** `response`, `toolCall`, **`mode`**, and **`environment`** (each echoing normalized server values). Also **`model`** (Gemini model id that produced the reply), **`modelFallback`** (`true` when a model after the first in the chain succeeded), and **`modelChain`** (ordered list of model ids — same as **`GEMINI_MODEL_FALLBACK_CHAIN`** in `geminiService.js`).
 - **Chat mode:** The server does not run structured-output parsing for tools; the model is instructed not to emit **`edit_file`** / **`create_file`** JSON.
 - **Agent mode:** The server parses model text with `assistantOutput.js`; a reply without a valid tool payload is an error (**502** with `Gemini API error` / detail text).
 - **Errors:** JSON with `error` and usually `detail`; typical statuses **400**, **401/403**, **429**, **500**, **502** (see prior README behavior — missing key, rate limits, upstream failures).
 
-### 5.3 `POST /run`
+### 5.3 `POST /format`
+
+- **URLs:** `http://localhost:5173/format` (proxied) or `http://localhost:3001/format`
+- **Body:** **`code`** (string, required). **`environment`**: use **`"python"`** for Black formatting. **`"js"`** returns **400** (JavaScript uses client-side Prettier). Legacy **`runtime`** is accepted like **`POST /run`**. Same max length as Run (**`MAX_RUN_CODE_CHARS`**).
+- **200:** **`{ code, error }`**. On success **`error`** is empty and **`code`** is the formatted source. On formatter failure **`code`** may be empty and **`error`** explains (e.g. Black not installed, syntax error).
+- **Requires:** [Black](https://black.readthedocs.io/) on the server host — e.g. **`py -m pip install black`** (Windows) or **`pip install black`**. If the `black` script is not on PATH, the server falls back to **`py -m black`** / **`python -m black`**. Override with **`BLACK_BIN`** (executable or `py -m black`). Optional **`FORMAT_PYTHON_TIMEOUT_MS`** (default **15000**, max **60000**).
+
+### 5.4 `POST /run`
 
 - **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
 - **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** (default **`"js"`**). Legacy **`runtime`** is read if **`environment`** is omitted (same normalization). Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
@@ -240,6 +250,7 @@ sequenceDiagram
 │   ├── workspaceFileValidation.js
 │   ├── runCode.js
 │   ├── runPython.js
+│   ├── formatPython.js
 │   ├── stripAnsi.js
 │   ├── scripts/
 │   │   └── test-strip-ansi.mjs
@@ -258,6 +269,7 @@ sequenceDiagram
         ├── workspaceFilename.js
         ├── workspaceFileValidation.js
         ├── workspaceStorage.js
+        ├── formatJavaScript.js
         └── components/
             ├── FileExplorer.jsx
             ├── CodeEditor.jsx
@@ -269,7 +281,8 @@ sequenceDiagram
 
 | File | Role |
 |------|------|
-| `App.jsx` | Dual **`environment`**, two workspace slices, per-env undo/redo, Run/output, AI diff + toast, theme toggle |
+| `App.jsx` | Dual **`environment`**, two workspace slices, per-env undo/redo, Run/Format/output, AI diff + toast, theme toggle |
+| `formatJavaScript.js` | Prettier format for **`.js`** in the browser |
 | `theme.js` | **`loadTheme`** / **`persistTheme`** / **`applyTheme`**; key **`llm:theme:v1`** |
 | `workspaceSnippet.js` | **`formatGistSnippet`**, **`gistSnippetPreviewLine`** — Markdown blocks for clipboard |
 | `exportWorkspaceZip.js` | **`downloadDualWorkspaceZip`** — browser ZIP via **`jszip`** |
@@ -278,7 +291,7 @@ sequenceDiagram
 | `workspaceStorage.js` | Dual-workspace **`localStorage`** (`llm:dualWorkspace:v1`), legacy **`llm:workspace:v1`** migration |
 | `FileExplorer.jsx` | List, new file, rename (**.js** / **.py** suffix UI per environment), delete |
 | `CodeEditor.jsx` | Monaco; **`key`** includes **`environment`** |
-| `ChatPanel.jsx` | Thread + `POST /chat` |
+| `ChatPanel.jsx` | Thread + `POST /chat`; footer shows **`model`** / **`modelChain`** from the server |
 | `AiEditPreviewModal.jsx` | Diff editor + accept/reject |
 
 **Notable client deps:** `lucide-react`, `@monaco-editor/react`, `monaco-editor`, `vite-plugin-monaco-editor` (Monaco workers; use `default` export interop in `vite.config.js`).
@@ -327,6 +340,7 @@ Output: **`client/dist/`**, including **`monacoeditorwork/`** for workers — de
 | `POST /run` timeout / killed | **JS:** exceeded **`RUN_TIMEOUT_MS`** — shorten work or raise **`RUN_VM_TIMEOUT_MS`** and restart. **Python:** exceeded **`RUN_PYTHON_TIMEOUT_MS`** (or VM fallback) — same idea. |
 | `POST /run` async / eval issues (**JS** only) | **`allowAsync: false`**, **`eval: false`** — use simple synchronous scripts |
 | `POST /run` “Python not found” | **Python** runtime: interpreter missing or wrong **`PYTHON_BIN`** |
+| Format toast “Black not found” | On the server host: `py -m pip install black` (or `pip install black`). Restart **`npm run dev`**. Optional **`BLACK_BIN=py -m black`** in **`server/.env`** |
 | Run disabled | No active `.js` tab |
 | Rename blocked | Invalid base name, separators, or duplicate after normalization |
 | Output “gone” | Output panel minimized — expand via chevron or Run |
@@ -348,6 +362,7 @@ When requesting changes, specify: **which side** (`server` / `client` / both), *
 | Workspace paths / validation | `workspaceFilename.js`, `workspaceFileValidation.js` (client + server), `FileExplorer.jsx`, `App.jsx` |
 | Browser workspace persistence | `workspaceStorage.js`, `App.jsx` (persist effect, **Reset**), `App.css` (reset button) |
 | Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/stripAnsi.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
+| Format (Prettier + Black) | `client/src/formatJavaScript.js`, `server/formatPython.js`, `server/index.js` (`POST /format`), `App.jsx`, `vite.config.js` |
 | UI / Monaco | `App.css`, `index.css`, `CodeEditor.jsx`, `vite.config.js`, `index.html`, `public/favicon.svg` |
 
 Record **factual implementation changes** in [`agent-memory.md`](./agent-memory.md) (append-only).

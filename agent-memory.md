@@ -146,3 +146,29 @@ It must NOT describe intended features, only implemented changes.
 - **`client/src/components/FileExplorer.jsx`**: per-row copy icon; context menu **Copy gist snippet**; **`onCopySnippet`** prop.
 - **`client/src/App.css`**: **`.workspace__share-btn`**, **`.editor-toolbar-btn`**, **`.editor-snippet-strip`**, **`.workspace-toast`** (shared with **`.ai-toast`** styles).
 - **`README.md`**: §4 overview + §4.2 export/snippet UX; layout table entries for new modules.
+
+### 2026-05-15 — Chat footer: Gemini model that answered
+
+- **`server/services/geminiService.js`**: **`generateResponse`** returns **`modelId`** and **`modelFallback`** (from **`generateContentWithModelFallback`**).
+- **`server/index.js`**: **`POST /chat`** 200 JSON adds **`model`**, **`modelFallback`**, **`modelChain`** (re-exports **`GEMINI_MODEL_FALLBACK_CHAIN`**).
+- **`client/src/components/ChatPanel.jsx`**: footer above composer — last **`model`**, **fallback** badge when applicable, full chain with active model highlighted; idle hint before first message.
+- **`client/src/App.css`**: **`.chat-panel__footer`** and related styles.
+- **`README.md`**: §4.3 footer UX; §5.1 / §5.2 response fields; **`ChatPanel.jsx`** table note.
+
+### 2026-05-15 — Format document (Prettier JS, Black Python)
+
+- **`client/package.json`**: dependency **`prettier`**.
+- **`client/src/formatJavaScript.js`** (new): **`formatJavaScript`** (async **`await prettier.format`**) via **`prettier/standalone`** + babel/estree plugins.
+- **`server/formatPython.js`** (new): **`formatPythonWithBlack`** — **`spawnSync`** **`black -q -`** (stdin/stdout); **`BLACK_BIN`**, **`FORMAT_PYTHON_TIMEOUT_MS`** env; reuses **`MAX_RUN_CODE_CHARS`**.
+- **`server/index.js`**: **`POST /format`** — Python only; JS returns **400** (client Prettier).
+- **`server/.env.example`**: **`BLACK_BIN`**, **`FORMAT_PYTHON_TIMEOUT_MS`** documented.
+- **`client/vite.config.js`**: proxy **`/format`** → Express.
+- **`client/src/App.jsx`**: editor **Format** button; **`handleFormatDocument`** (Prettier in-browser for JS, **`fetch /format`** for Python); undo snapshot before apply; **`formatPending`** state.
+- **`README.md`**: overview, §4.2 Format UX, §5.1 route table, §5.3 **`POST /format`** (Run renumbered §5.4).
+
+### 2026-05-15 — Black setup: install + Windows-friendly invocation
+
+- Installed **Black** on dev host via **`py -m pip install black`** (user site-packages; `black.exe` not on PATH).
+- **`server/formatPython.js`**: **`getBlackInvocationCandidates`** — tries **`black`**, then **`PYTHON_BIN -m black`**, then **`py -m black`** / **`python -m black`** (platform-specific); **`BLACK_BIN`** supports custom executable or `py -m black`; ENOENT tries next candidate; clearer aggregate error.
+- **`server/.env.example`**: install note and **`BLACK_BIN=py -m black`** example.
+- **`README.md`**: fallback chain and Windows **`py -m pip install black`** troubleshooting.

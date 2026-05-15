@@ -12,8 +12,10 @@ import {
   RotateCcw,
   Sparkles,
   Undo2,
+  Wand2,
 } from "lucide-react";
 import { copyTextToClipboard } from "./copyToClipboard.js";
+import { formatJavaScript } from "./formatJavaScript.js";
 import { downloadDualWorkspaceZip } from "./exportWorkspaceZip.js";
 import { formatGistSnippet, gistSnippetPreviewLine } from "./workspaceSnippet.js";
 import { applyTheme, loadTheme, persistTheme } from "./theme.js";
@@ -74,6 +76,7 @@ export default function App() {
   const [runOutput, setRunOutput] = useState("");
   const [runError, setRunError] = useState("");
   const [runPending, setRunPending] = useState(false);
+  const [formatPending, setFormatPending] = useState(false);
   const [runOutputMinimized, setRunOutputMinimized] = useState(false);
   const [colorTheme, setColorTheme] = useState(() => loadTheme());
   const toastTimerRef = useRef(null);
@@ -254,6 +257,74 @@ export default function App() {
       setRunPending(false);
     }
   }, []);
+
+  const handleFormatDocument = useCallback(async () => {
+    const env = dualWorkspaceRef.current.environment;
+    const w = dualWorkspaceRef.current[env];
+    const ap = w.activePath;
+    if (!ap) return;
+    if (env === "python" && !isValidPyWorkspaceFilename(ap)) return;
+    if (env === "js" && !isValidJsWorkspaceFilename(ap)) return;
+
+    const code = typeof w.files[ap] === "string" ? w.files[ap] : "";
+    setFormatPending(true);
+
+    try {
+      let formatted;
+      if (env === "js") {
+        formatted = await formatJavaScript(code);
+      } else {
+        const res = await fetch("/format", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code, environment: "python" }),
+        });
+
+        let data = {};
+        const raw = await res.text();
+        if (raw) {
+          try {
+            data = JSON.parse(raw);
+          } catch {
+            throw new Error(raw.slice(0, 200) || `HTTP ${res.status}`);
+          }
+        }
+
+        if (!res.ok) {
+          const detail = typeof data.detail === "string" ? data.detail : null;
+          const errLabel = typeof data.error === "string" ? data.error : `HTTP ${res.status}`;
+          throw new Error(detail || errLabel);
+        }
+
+        const fmtErr = typeof data.error === "string" ? data.error.trim() : "";
+        if (fmtErr) throw new Error(fmtErr);
+        if (typeof data.code !== "string") {
+          throw new Error("Invalid format response from server");
+        }
+        formatted = data.code;
+      }
+
+      if (typeof formatted !== "string") {
+        throw new Error("Formatter did not return a string");
+      }
+
+      pushUndoSnapshot(cloneWorkspace(w));
+      resetManualEditGroup();
+      setDualWorkspace((dw) => ({
+        ...dw,
+        [env]: {
+          ...dw[env],
+          files: { ...dw[env].files, [ap]: formatted },
+        },
+      }));
+      showToast(env === "js" ? "Formatted with Prettier" : "Formatted with Black");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Format failed";
+      showToast(msg);
+    } finally {
+      setFormatPending(false);
+    }
+  }, [pushUndoSnapshot, resetManualEditGroup, showToast]);
 
   const handleEditorChange = useCallback(
     (value) => {
@@ -630,9 +701,27 @@ export default function App() {
               </button>
               <button
                 type="button"
+                className="editor-toolbar-btn"
+                onClick={handleFormatDocument}
+                disabled={!canRunCode || formatPending || runPending}
+                title={
+                  !canRunCode
+                    ? environment === "python"
+                      ? "Open a .py file to format"
+                      : "Open a .js file to format"
+                    : environment === "python"
+                      ? "Format with Black (local subprocess; pip install black)"
+                      : "Format with Prettier (in browser)"
+                }
+              >
+                <Wand2 size={14} strokeWidth={2} aria-hidden />
+                {formatPending ? "Formatting…" : "Format"}
+              </button>
+              <button
+                type="button"
                 className="editor-run-btn"
                 onClick={handleRunCode}
-                disabled={!canRunCode || runPending}
+                disabled={!canRunCode || runPending || formatPending}
                 title={
                   !canRunCode
                     ? environment === "python"

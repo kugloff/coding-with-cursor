@@ -13,12 +13,14 @@ export default function ChatPanel({
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState("chat");
   const [pending, setPending] = useState(false);
+  const [lastModelInfo, setLastModelInfo] = useState(null);
   const listRef = useRef(null);
   const messageIdRef = useRef(0);
 
   useEffect(() => {
     setMessages([]);
     setInput("");
+    setLastModelInfo(null);
   }, [environment]);
 
   const appendMessage = useCallback((role, text) => {
@@ -122,6 +124,17 @@ export default function ChatPanel({
         assistantBody = textPart ? `${prefix}\n\n${textPart}` : `${prefix}`;
       } else if (!assistantBody) {
         throw new Error("Invalid response from server (empty reply)");
+      }
+
+      if (typeof data.model === "string" && data.model.trim()) {
+        const chain = Array.isArray(data.modelChain)
+          ? data.modelChain.filter((m) => typeof m === "string" && m.trim())
+          : [];
+        setLastModelInfo({
+          model: data.model.trim(),
+          modelFallback: Boolean(data.modelFallback),
+          modelChain: chain,
+        });
       }
 
       appendMessage("assistant", assistantBody);
@@ -238,6 +251,49 @@ export default function ChatPanel({
           </div>
         )}
       </div>
+      <footer className="chat-panel__footer" aria-label="Gemini model information">
+        {lastModelInfo ? (
+          <p className="chat-panel__footer-status">
+            Answered by{" "}
+            <code className="chat-panel__footer-model chat-panel__footer-model--active">{lastModelInfo.model}</code>
+            {lastModelInfo.modelFallback ? (
+              <span
+                className="chat-panel__footer-badge"
+                title="An earlier model in the chain failed; this one succeeded"
+              >
+                fallback
+              </span>
+            ) : null}
+          </p>
+        ) : (
+          <p className="chat-panel__footer-status chat-panel__footer-status--idle">
+            Send a message to see which Gemini model replies.
+          </p>
+        )}
+        <p className="chat-panel__footer-hint">
+          <span className="chat-panel__footer-hint-label">Fallback chain</span>
+          {lastModelInfo?.modelChain?.length ? (
+            <span className="chat-panel__footer-chain">
+              {lastModelInfo.modelChain.map((id, i) => (
+                <span key={id} className="chat-panel__footer-chain-item">
+                  {i > 0 ? <span className="chat-panel__footer-chain-sep" aria-hidden>→</span> : null}
+                  <code
+                    className={`chat-panel__footer-model${
+                      id === lastModelInfo.model ? " chat-panel__footer-model--active" : ""
+                    }`}
+                  >
+                    {id}
+                  </code>
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="chat-panel__footer-chain chat-panel__footer-chain--muted">
+              Server tries each model in order until one succeeds (skips the rest on auth or bad request).
+            </span>
+          )}
+        </p>
+      </footer>
       <form className="chat-panel__composer" onSubmit={handleSend}>
         <label className="visually-hidden" htmlFor="chat-input">
           {chatMode === "agent"

@@ -1179,6 +1179,98 @@
   }
 }
 
+.chat-panel__footer {
+  flex-shrink: 0;
+  padding: 0.4rem 0.55rem 0.35rem;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+}
+
+.chat-panel__footer-status {
+  margin: 0 0 0.28rem;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.chat-panel__footer-status--idle {
+  color: var(--text-muted);
+}
+
+.chat-panel__footer-model {
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  font-size: 0.625rem;
+  padding: 0.05rem 0.28rem;
+  border-radius: 4px;
+  background: var(--hover-surface-faint);
+  color: var(--text-muted);
+}
+
+.chat-panel__footer-model--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+}
+
+.chat-panel__footer-badge {
+  margin-left: 0.35rem;
+  padding: 0.06rem 0.32rem;
+  border-radius: var(--radius-full);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  vertical-align: middle;
+}
+
+.chat-panel__footer-hint {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem 0.4rem;
+  font-size: 0.625rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.chat-panel__footer-hint-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-panel__footer-chain {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.12rem 0.2rem;
+  min-width: 0;
+}
+
+.chat-panel__footer-chain--muted {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-muted);
+}
+
+.chat-panel__footer-chain-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.chat-panel__footer-chain-sep {
+  color: var(--text-dim);
+  font-size: 0.5625rem;
+  user-select: none;
+}
+
 .chat-panel__composer {
   padding: 0.55rem 0.6rem 0.65rem;
   border-top: 1px solid var(--border-subtle);

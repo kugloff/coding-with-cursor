@@ -3,12 +3,14 @@ import express from "express";
 import cors from "cors";
 import {
   generateResponse,
+  GEMINI_MODEL_FALLBACK_CHAIN,
   GeminiConfigurationError,
   GeminiApiError,
 } from "./services/geminiService.js";
 import { normalizeChatMode, normalizeChatEnvironment, parseChatContext } from "./chatBody.js";
 import { executeJavaScript, MAX_RUN_CODE_CHARS } from "./runCode.js";
 import { executePython } from "./runPython.js";
+import { formatPythonWithBlack } from "./formatPython.js";
 
 /**
  * POST /run execution target: prefers `environment`, falls back to legacy `runtime`.
@@ -81,6 +83,9 @@ app.post("/chat", async (req, res) => {
       toolCall: result.toolCall ?? null,
       mode,
       environment,
+      model: result.modelId ?? GEMINI_MODEL_FALLBACK_CHAIN[0],
+      modelFallback: Boolean(result.modelFallback),
+      modelChain: GEMINI_MODEL_FALLBACK_CHAIN,
     });
   } catch (err) {
     if (err instanceof GeminiConfigurationError) {
@@ -105,6 +110,49 @@ app.post("/chat", async (req, res) => {
     return res.status(500).json({
       error: "Internal server error",
       detail: "An unexpected error occurred while processing the chat request.",
+    });
+  }
+});
+
+app.post("/format", (req, res) => {
+  const body = req.body ?? {};
+  const { code } = body;
+  const environment = normalizeRunEnvironment(body);
+
+  if (typeof code !== "string") {
+    return res.status(400).json({
+      code: "",
+      error:
+        'Invalid request body: expected JSON with a string "code" field. Optional: "environment" ("js" | "python", default "js"); legacy "runtime" is accepted as a fallback.',
+    });
+  }
+
+  if (code.length > MAX_RUN_CODE_CHARS) {
+    return res.status(400).json({
+      code: "",
+      error: `Code exceeds maximum length (${MAX_RUN_CODE_CHARS} characters).`,
+    });
+  }
+
+  if (environment === "js") {
+    return res.status(400).json({
+      code: "",
+      error:
+        "JavaScript is formatted in the browser with Prettier. Send environment python for Black, or use the editor Format button.",
+    });
+  }
+
+  try {
+    const { code: formatted, error } = formatPythonWithBlack(code);
+    return res.json({
+      code: typeof formatted === "string" ? formatted : "",
+      error: typeof error === "string" ? error : String(error ?? ""),
+    });
+  } catch (err) {
+    console.error("POST /format unexpected error:", err);
+    return res.status(500).json({
+      code: "",
+      error: "Internal error while formatting code.",
     });
   }
 });
