@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
   ChevronDown,
   ChevronUp,
+  ClipboardCopy,
   LayoutPanelLeft,
   MessageSquare,
   PanelsTopLeft,
@@ -11,6 +13,10 @@ import {
   Sparkles,
   Undo2,
 } from "lucide-react";
+import { copyTextToClipboard } from "./copyToClipboard.js";
+import { downloadDualWorkspaceZip } from "./exportWorkspaceZip.js";
+import { formatGistSnippet, gistSnippetPreviewLine } from "./workspaceSnippet.js";
+import { applyTheme, loadTheme, persistTheme } from "./theme.js";
 import "./App.css";
 import FileExplorer from "./components/FileExplorer.jsx";
 import CodeEditor from "./components/CodeEditor.jsx";
@@ -63,11 +69,13 @@ export default function App() {
   });
   const [editorNonce, setEditorNonce] = useState(0);
   const [aiEditPreview, setAiEditPreview] = useState(null);
-  const [aiEditToastFile, setAiEditToastFile] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [exportZipPending, setExportZipPending] = useState(false);
   const [runOutput, setRunOutput] = useState("");
   const [runError, setRunError] = useState("");
   const [runPending, setRunPending] = useState(false);
   const [runOutputMinimized, setRunOutputMinimized] = useState(false);
+  const [colorTheme, setColorTheme] = useState(() => loadTheme());
   const toastTimerRef = useRef(null);
   const undoByEnv = useRef({ js: [], python: [] });
   const redoByEnv = useRef({ js: [], python: [] });
@@ -91,6 +99,11 @@ export default function App() {
   useEffect(() => {
     persistDualWorkspace(dualWorkspace);
   }, [dualWorkspace]);
+
+  useEffect(() => {
+    applyTheme(colorTheme);
+    persistTheme(colorTheme);
+  }, [colorTheme]);
 
   useEffect(() => {
     return () => {
@@ -171,11 +184,11 @@ export default function App() {
     setRunOutputMinimized(false);
   }, [bumpHistoryUi, resetManualEditGroup]);
 
-  const showAiEditToast = useCallback((message) => {
+  const showToast = useCallback((message) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setAiEditToastFile(typeof message === "string" && message.trim() ? message.trim() : "Saved.");
+    setToastMessage(typeof message === "string" && message.trim() ? message.trim() : "Done.");
     toastTimerRef.current = window.setTimeout(() => {
-      setAiEditToastFile(null);
+      setToastMessage(null);
       toastTimerRef.current = null;
     }, 3200);
   }, []);
@@ -369,9 +382,9 @@ export default function App() {
         tool.action === "create_file"
           ? `File created by AI: ${filename}`
           : `File updated by AI: ${filename}`;
-      showAiEditToast(toastMsg);
+      showToast(toastMsg);
     },
-    [pushUndoSnapshot, resetManualEditGroup, showAiEditToast],
+    [pushUndoSnapshot, resetManualEditGroup, showToast],
   );
 
   const handleAiEditProposal = useCallback(
@@ -417,6 +430,45 @@ export default function App() {
     return editorLanguageForWorkspacePath(aiEditPreview.filename);
   }, [aiEditPreview, environment]);
 
+  const snippetPreview = useMemo(() => {
+    if (!activePath) return "Open a file to copy a gist-style Markdown snippet";
+    return gistSnippetPreviewLine(activePath);
+  }, [activePath]);
+
+  const handleCopySnippet = useCallback(
+    async (path) => {
+      const p = path ?? activePath;
+      if (!p || typeof files[p] !== "string") {
+        showToast("No file to copy");
+        return;
+      }
+      const text = formatGistSnippet(p, files[p]);
+      const ok = await copyTextToClipboard(text);
+      showToast(ok ? `Copied snippet: ${p}` : "Could not copy to clipboard");
+    },
+    [activePath, files, showToast],
+  );
+
+  const handleExportZip = useCallback(async () => {
+    if (exportZipPending) return;
+    setExportZipPending(true);
+    try {
+      await downloadDualWorkspaceZip({
+        js: dualWorkspaceRef.current.js,
+        python: dualWorkspaceRef.current.python,
+      });
+      showToast("Workspace ZIP downloaded");
+    } catch {
+      showToast("ZIP export failed");
+    } finally {
+      setExportZipPending(false);
+    }
+  }, [exportZipPending, showToast]);
+
+  const setColorThemeChoice = useCallback((next) => {
+    setColorTheme(next === "light" ? "light" : "dark");
+  }, []);
+
   const setEnvironment = useCallback((next) => {
     const n = next === "python" ? "python" : "js";
     setDualWorkspace((dw) => {
@@ -441,6 +493,24 @@ export default function App() {
           <span className="workspace__title">Workspace</span>
         </div>
         <div className="workspace__topbar-right">
+          <div className="workspace__theme-toggle" role="group" aria-label="Color theme">
+            <button
+              type="button"
+              className={`workspace__theme-btn${colorTheme === "dark" ? " workspace__theme-btn--active" : ""}`}
+              onClick={() => setColorThemeChoice("dark")}
+              aria-pressed={colorTheme === "dark"}
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              className={`workspace__theme-btn${colorTheme === "light" ? " workspace__theme-btn--active" : ""}`}
+              onClick={() => setColorThemeChoice("light")}
+              aria-pressed={colorTheme === "light"}
+            >
+              Light
+            </button>
+          </div>
           <div className="workspace__env-toggle" role="group" aria-label="Workspace environment">
             <button
               type="button"
@@ -459,6 +529,18 @@ export default function App() {
               aria-pressed={environment === "python"}
             >
               Python
+            </button>
+          </div>
+          <div className="workspace__share-btns" role="group" aria-label="Export and share">
+            <button
+              type="button"
+              className="workspace__share-btn"
+              onClick={handleExportZip}
+              disabled={exportZipPending}
+              title="Download javascript/ and python/ folders as a ZIP (all tabs in both workspaces)"
+            >
+              <Archive size={14} strokeWidth={2} aria-hidden />
+              {exportZipPending ? "Exporting…" : "Export ZIP"}
             </button>
           </div>
           <div className="workspace__history-btns" role="group" aria-label="Workspace history">
@@ -515,6 +597,7 @@ export default function App() {
             onCreate={handleCreateFile}
             onDeleteFile={handleDeleteFile}
             onRenameFile={handleRenameFile}
+            onCopySnippet={handleCopySnippet}
           />
         </aside>
 
@@ -531,6 +614,20 @@ export default function App() {
               <span className="pane-header__pill pane-header__pill--muted" title="Active workspace environment">
                 {environment === "python" ? "Python" : "JS"}
               </span>
+              <button
+                type="button"
+                className="editor-toolbar-btn"
+                onClick={() => handleCopySnippet()}
+                disabled={!activePath}
+                title={
+                  activePath
+                    ? "Copy active file as Markdown gist block (### title + fenced code)"
+                    : "Open a file to copy its gist snippet"
+                }
+              >
+                <ClipboardCopy size={14} strokeWidth={2} aria-hidden />
+                Copy snippet
+              </button>
               <button
                 type="button"
                 className="editor-run-btn"
@@ -551,11 +648,26 @@ export default function App() {
               </button>
             </div>
           </div>
+          <div className="editor-snippet-strip" aria-label="Gist snippet preview">
+            <span className="editor-snippet-strip__label">Gist</span>
+            <code className="editor-snippet-strip__preview">{snippetPreview}</code>
+            <button
+              type="button"
+              className="editor-snippet-strip__copy"
+              onClick={() => handleCopySnippet()}
+              disabled={!activePath}
+              title="Copy Markdown gist block to clipboard"
+            >
+              <ClipboardCopy size={13} strokeWidth={2} aria-hidden />
+              Copy
+            </button>
+          </div>
           <div className="editor-column">
             <CodeEditor
               path={activePath}
               editorNonce={editorNonce}
               environment={environment}
+              colorTheme={colorTheme}
               value={editorValue}
               onChange={handleEditorChange}
               language={editorLanguage}
@@ -625,15 +737,16 @@ export default function App() {
           original={aiEditPreview.original}
           modified={aiEditPreview.modified}
           language={aiPreviewLanguage}
+          colorTheme={colorTheme}
           toolAction={aiEditPreview.action}
           onAccept={handleAcceptAiEditPreview}
           onReject={handleRejectAiEditPreview}
         />
       )}
 
-      {aiEditToastFile && (
-        <div className="ai-toast" role="status" aria-live="polite">
-          {aiEditToastFile}
+      {toastMessage && (
+        <div className="workspace-toast" role="status" aria-live="polite">
+          {toastMessage}
         </div>
       )}
     </div>

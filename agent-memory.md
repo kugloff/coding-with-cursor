@@ -124,3 +124,25 @@ It must NOT describe intended features, only implemented changes.
 - **`server/runCode.js`**: **`sanitizeRunDisplay`** on final **`{ output, error }`**.
 - **`server/scripts/test-strip-ansi.mjs`**: assert-based smoke test; **`npm run test:strip-ansi`** in **`server/package.json`**.
 - **`README.md`**: §4.5 testing Run output (ANSI cleanup); §5.3 notes stripping on **`POST /run`** response.
+
+### 2026-05-15 — Light and dark UI themes
+
+- **`client/src/theme.js`** (new): **`THEME_STORAGE_KEY`** (`llm:theme:v1`), **`loadTheme`**, **`persistTheme`**, **`applyTheme`** (`data-theme` + `color-scheme` on **`<html>`**), **`monacoThemeForAppTheme`**.
+- **`client/src/index.css`**: shared tokens in **`:root`**; full palettes under **`[data-theme="dark"]`** and **`[data-theme="light"]`** (text, surfaces, accent, danger/warn, shadows, hovers, overlays).
+- **`client/index.html`**: **`data-theme="dark"`** on **`<html>`** to avoid flash before JS.
+- **`client/src/main.jsx`**: **`applyTheme(loadTheme())`** before React render.
+- **`client/src/App.jsx`**: **`colorTheme`** state; top bar **Dark** / **Light** toggle; **`useEffect`** persists/applies theme; passes **`colorTheme`** to **`CodeEditor`** and **`AiEditPreviewModal`**.
+- **`client/src/components/CodeEditor.jsx`**, **`AiEditPreviewModal.jsx`**: Monaco **`theme`** **`vs-dark`** or **`light`** from **`colorTheme`** prop.
+- **`client/src/App.css`**: theme/env segmented controls; hardcoded accent/danger/shadow colors replaced with CSS variables where needed for both themes.
+- **`README.md`**: theme toggle, **`llm:theme:v1`**, Monaco pairing, **`theme.js`** in layout table.
+
+### 2026-05-15 — Export ZIP and gist-style snippet copy
+
+- **`client/package.json`**: dependency **`jszip`** for in-browser archive download.
+- **`client/src/workspaceSnippet.js`** (new): **`formatGistSnippet`** (`###` title + fenced block with **`javascript`** / **`python`** lang), **`gistSnippetPreviewLine`**, **`markdownLangForWorkspaceFile`**.
+- **`client/src/copyToClipboard.js`** (new): **`copyTextToClipboard`** (`navigator.clipboard` + textarea fallback).
+- **`client/src/exportWorkspaceZip.js`** (new): **`downloadDualWorkspaceZip`** — zip folders **`javascript/`**, **`python/`**, **`README.txt`**; filename **`llm-workspace-YYYYMMDD-HHMM.zip`**.
+- **`client/src/App.jsx`**: top bar **Export ZIP**; editor **Copy snippet** + **gist strip** above Monaco; **`handleCopySnippet`** / **`handleExportZip`**; toast state renamed **`toastMessage`** / **`showToast`** (AI apply + copy/export feedback).
+- **`client/src/components/FileExplorer.jsx`**: per-row copy icon; context menu **Copy gist snippet**; **`onCopySnippet`** prop.
+- **`client/src/App.css`**: **`.workspace__share-btn`**, **`.editor-toolbar-btn`**, **`.editor-snippet-strip`**, **`.workspace-toast`** (shared with **`.ai-toast`** styles).
+- **`README.md`**: §4 overview + §4.2 export/snippet UX; layout table entries for new modules.

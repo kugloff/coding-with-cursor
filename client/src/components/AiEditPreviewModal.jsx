@@ -18,10 +18,12 @@ export default function AiEditPreviewModal({
   original,
   modified,
   language = "plaintext",
+  colorTheme = "dark",
   toolAction = "edit_file",
   onAccept,
   onReject,
 }) {
+  const monacoTheme = colorTheme === "light" ? "light" : "vs-dark";
   const isCreate = toolAction === "create_file";
   const title = isCreate ? "Review new file" : "Review AI changes";
   const acceptLabel = isCreate ? "Accept & create file" : "Accept changes";
@@ -54,12 +56,12 @@ export default function AiEditPreviewModal({
         </header>
         <div className="ai-edit-preview__diff-wrap">
           <DiffEditor
-            key={`${filename}:${toolAction}:${original.length}:${modified.length}`}
+            key={`${filename}:${toolAction}:${original.length}:${modified.length}:${monacoTheme}`}
             height="100%"
             language={language}
             original={original}
             modified={modified}
-            theme="vs-dark"
+            theme={monacoTheme}
             options={DIFF_OPTIONS}
           />
         </div>

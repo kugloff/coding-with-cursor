@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
+  ClipboardCopy,
   FileCode,
   PencilLine,
   Plus,
@@ -17,7 +18,7 @@ function FileGlyph() {
 }
 
 const CONTEXT_MENU_W = 168;
-const CONTEXT_MENU_H = 88;
+const CONTEXT_MENU_H = 132;
 
 export default function FileExplorer({
   environment = "js",
@@ -27,6 +28,7 @@ export default function FileExplorer({
   onCreate,
   onDeleteFile,
   onRenameFile,
+  onCopySnippet,
 }) {
   const [renamingPath, setRenamingPath] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -135,6 +137,18 @@ export default function FileExplorer({
             className="file-explorer__context-item"
             role="menuitem"
             onClick={() => {
+              onCopySnippet?.(contextMenu.path);
+              closeContextMenu();
+            }}
+          >
+            <ClipboardCopy size={14} strokeWidth={2} aria-hidden />
+            Copy gist snippet
+          </button>
+          <button
+            type="button"
+            className="file-explorer__context-item"
+            role="menuitem"
+            onClick={() => {
               beginRename(contextMenu.path);
               closeContextMenu();
             }}
@@ -233,6 +247,18 @@ export default function FileExplorer({
                     <span className="file-explorer__file-name">{path}</span>
                   </button>
                   <div className="file-explorer__actions">
+                    <button
+                      type="button"
+                      className="file-explorer__icon-btn"
+                      aria-label={`Copy gist snippet for ${path}`}
+                      title="Copy gist snippet"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCopySnippet?.(path);
+                      }}
+                    >
+                      <ClipboardCopy size={14} strokeWidth={2} />
+                    </button>
                     <button
                       type="button"
                       className="file-explorer__icon-btn"

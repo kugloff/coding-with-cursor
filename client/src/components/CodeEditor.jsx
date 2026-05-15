@@ -18,10 +18,12 @@ export default function CodeEditor({
   path,
   editorNonce = 0,
   environment = "js",
+  colorTheme = "dark",
   value,
   onChange,
   language = "javascript",
 }) {
+  const monacoTheme = colorTheme === "light" ? "light" : "vs-dark";
   const options = {
     ...DEFAULT_OPTIONS,
     readOnly: !path,
@@ -29,10 +31,10 @@ export default function CodeEditor({
   return (
     <div className="code-editor">
       <Editor
-        key={`${path || "__none__"}:${editorNonce}:${environment}`}
+        key={`${path || "__none__"}:${editorNonce}:${environment}:${monacoTheme}`}
         height="100%"
         language={language}
-        theme="vs-dark"
+        theme={monacoTheme}
         value={value}
         onChange={path ? onChange : undefined}
         options={options}
