@@ -1,29 +1,36 @@
-This is the system specification and intended behavior of the application.
-It describes how the system should work.
-For implementation history and changes, see: agent-memory.md
+This document is the **system specification** for the application: intended behavior, setup, API contracts, and operational notes.
 
-**How this repository was built:** The project was developed using **Cursor** for implementation and coding, and **ChatGPT** plus **Google Gemini** for planning, design discussions, and prompt engineering.
+**Implementation history** (append-only, factual changelog): [`agent-memory.md`](./agent-memory.md)
 
-# Workspace documentation
+| Document | Update when… |
+|----------|----------------|
+| **README.md** | Behavior, user-facing features, API contracts, or setup change |
+| **agent-memory.md** | Code lands; append entries—do not duplicate long implementation detail in both |
 
-Browser-based **multi-language workspace** (top bar **JavaScript** / **Python** / **C#**): each environment has its own in-memory files (**`*.js`**, **`*.py`**, or **`*.cs`**), Monaco editor, undo/redo, and AI chat context. **Run** uses **vm2** (JS), a Python subprocess, or **`dotnet run`** (C#). **Format** uses **Prettier**, **Black**, and **CSharpier**. **Google Gemini** chat supports **Chat**, **Agent**, and **Translate**. Stack: **Express** (`server/`) + **Vite + React 19** (`client/`).
+**How this repository was built:** **Cursor** for implementation; **ChatGPT** and **Google Gemini** for planning, design, and prompt engineering.
 
-**Implementation history (append-only, factual):** [`agent-memory.md`](./agent-memory.md) — update **this** file when **behavior or spec** changes; append **`agent-memory.md`** only for **code** changes; do not duplicate the same detail in both (prefer **`agent-memory.md`** for implementation detail when unsure).
+---
+
+# Multi-language workspace
+
+Browser-based editor for **JavaScript**, **Python**, and **C#**. Each language has its own file list, Monaco buffer, undo/redo stack, and AI context. **Run** and **Format** are per-language. **Google Gemini** powers **Chat**, **Agent**, and **Translate** modes.
+
+**Stack:** Express API (`server/`) + Vite + React 19 UI (`client/`) + shared registry (`shared/`).
 
 ---
 
 ## Table of contents
 
-1. [Overview](#1-overview)  
-2. [Quick start](#2-quick-start)  
-3. [Configuration](#3-configuration)  
-4. [Using the application](#4-using-the-application)  
-5. [API reference](#5-api-reference)  
-6. [Project layout](#6-project-layout)  
-7. [Build and deployment notes](#7-build-and-deployment-notes)  
-8. [Security and limitations](#8-security-and-limitations)  
-9. [Troubleshooting](#9-troubleshooting)  
-10. [For contributors and AI assistants](#10-for-contributors-and-ai-assistants)
+1. [Overview](#1-overview)
+2. [Quick start](#2-quick-start)
+3. [Configuration](#3-configuration)
+4. [Using the application](#4-using-the-application)
+5. [API reference](#5-api-reference)
+6. [Project layout](#6-project-layout)
+7. [Build and deployment](#7-build-and-deployment)
+8. [Security and limitations](#8-security-and-limitations)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Contributors and AI assistants](#10-contributors-and-ai-assistants)
 
 ---
 
@@ -31,27 +38,41 @@ Browser-based **multi-language workspace** (top bar **JavaScript** / **Python** 
 
 | Part | Path | Stack | Default URL |
 |------|------|-------|----------------|
-| API | `server/` | Node.js, Express, ESM; **`vm2`** for JS **`POST /run`**; Python **`POST /run`** via subprocess | http://localhost:3001 |
+| API | `server/` | Node.js, Express (ESM), `vm2`, subprocess runners | http://localhost:3001 |
 | UI | `client/` | React 19, Vite 6, Monaco, lucide-react | http://localhost:5173 |
 
-**High-level behavior**
+### Core behavior
 
-- **Multi workspace:** The top bar language switch selects **`environment`**: isolated slices **`{ files, activePath }`** per language (JS, Python, C#), not shared. Defaults: **`main.js`**, **`main.py`**, **`main.cs`**. Explorer and chat see the active slice; **Run** / **Format** follow per-language flags in **`shared/workspaceEnvironments.js`**. **Undo/redo** is tracked **per environment** (in-memory only).
-- **Persistence:** All slices plus **`environment`** are saved under **`localStorage`** key **`llm:dualWorkspace:v1`**. Missing slices (e.g. **C#** on older saves) are hydrated with defaults on load. Legacy **`llm:workspace:v1`** migrates into the JS slice. **Reset** restores all default workspaces and clears undo stacks.
-- **Theme:** Top bar **Dark** / **Light** sets **`data-theme`** on **`<html>`** (CSS variables in **`index.css`**). Choice is persisted under **`localStorage`** key **`llm:theme:v1`**. Monaco uses **`vs-dark`** or **`light`** to match. Default is **dark** if storage is missing or invalid.
-- **Export:** Top bar **Export ZIP** downloads **`javascript/`**, **`python/`**, and **`csharp/`** folders (all tabs in every workspace) plus **`README.txt`**, built in the browser via **`jszip`**.
-- **Copy:** **Copy code** — raw file source (paste into an editor). **Copy snippet** — gist-style Markdown (`### filename` + fenced code block) for issues/chat. Per-file copy is via the explorer context menu (right-click) or the active tab’s editor header (**Copy code** / **Copy snippet**). Rename and delete stay as row icons in the explorer (and in the context menu).
-- **AI chat:** Every **`POST /chat`** includes **`environment`** (must match the UI) and **`mode`** (**Chat**, **Agent**, or **Translate**). File keys must match the **source** workspace extension (e.g. **`*.cs`** for C#). **Agent** edits stay in that environment; **Translate** writes to another registered language (see §4.3).
-- **Run:** **`POST /run`** with **`environment`** **`"js"`**, **`"python"`**, or **`"csharp"`**. JS uses **`vm2`**; Python uses **`runPython.js`**; C# uses **`runCsharp.js`** (temp console project + **`dotnet run`**). C# runs are slower (compile each time). See §5.4.
-- **Format:** **Prettier** (browser) for **`.js`**; **Black** (server) for **`.py`**; **CSharpier** (server) for **`.cs`** (`dotnet tool install -g csharpier` on the host running Express). See §5.3.
+| Area | Behavior |
+|------|----------|
+| **Workspaces** | Top bar switches **`environment`**: isolated `{ files, activePath }` per language. Defaults: `main.js`, `main.py`, `main.cs`. Registry: `shared/workspaceEnvironments.js`. |
+| **Persistence** | `localStorage` key **`llm:dualWorkspace:v1`**. Legacy **`llm:workspace:v1`** migrates into the JS slice. Missing slices (e.g. C# on old saves) hydrate with defaults. **Reset** restores all languages and clears undo. |
+| **Undo / redo** | Up to **40** snapshots **per environment** (in-memory only). |
+| **Theme** | **Dark** / **Light** on `<html>` (`data-theme`); persisted as **`llm:theme:v1`**. Monaco follows (`vs-dark` / `light`). |
+| **Export** | **Export ZIP** — all files in **every** environment under `javascript/`, `python/`, `csharp/` plus `README.txt` (browser, `jszip`). |
+| **Copy** | **Copy code** (raw source) and **Copy snippet** (gist-style Markdown). Explorer: right-click or row actions; editor header buttons for the active tab. |
+| **Run** | `POST /run` — JS (**vm2**), Python (subprocess, stdin), C# (temp project + **`dotnet run`**). Default wall-clock limit **5 s** per language (configurable). |
+| **Format** | JS: **Prettier** in the browser. Python: **Black** on server. C#: **CSharpier** on server (temp file, deleted after format). |
+| **AI** | `POST /chat` with **`mode`** and **`environment`**. **Agent** edits the current language; **Translate** ports the active file to another registered language (`_converted` naming). |
 
-**Gemini:** `@google/generative-ai`, API key: **`GEMINI_API_KEY`**. Chat calls **`generateContent`** with automatic model fallback in **`GEMINI_MODEL_FALLBACK_CHAIN`** (`server/services/geminiService.js`): **`gemini-2.5-flash`** → **`gemini-2.5-flash-lite`** → **`gemini-3-flash-preview`** → **`gemini-3.1-flash-lite`** → **`gemini-2.5-pro`**. On recoverable failures (e.g. model unavailable, 429, 5xx, empty reply), the server tries the next model; **401/403** and **400** do not advance the chain. Prompts use compact section tags; file bodies still respect **`MAX_CONTEXT_CHARS`** / **`MAX_FILE_CHARS`**.
+### Gemini
+
+- Package: `@google/generative-ai`; key: **`GEMINI_API_KEY`** in `server/.env`.
+- Model fallback chain (`server/services/geminiService.js`): **`gemini-2.5-flash`** → **`gemini-2.5-flash-lite`** → **`gemini-3-flash-preview`** → **`gemini-3.1-flash-lite`** → **`gemini-2.5-pro`**.
+- Retries on recoverable failures (unavailable model, 429, 5xx, empty reply). **401**, **403**, and **400** do not advance the chain.
+- Prompts use section tags (`[paths]`, `[active]`, `[file …]`, rules block). Context caps: **`MAX_CONTEXT_CHARS`** 200 000 total, **`MAX_FILE_CHARS`** 120 000 per file (truncation noted in prompt when applied).
 
 ---
 
 ## 2. Quick start
 
-**Prerequisites:** Node.js **18+** recommended. **Optional:** Python **3** on **`PATH`** for Python Run/format; **[.NET SDK](https://dotnet.microsoft.com/download)** for C# Run/format (`dotnet` on PATH).
+**Prerequisites**
+
+| Requirement | Used for |
+|-------------|----------|
+| **Node.js 18+** | API and UI |
+| **Python 3** on `PATH` (optional) | Python Run / Black format |
+| **[.NET SDK](https://dotnet.microsoft.com/download)** (optional) | C# Run / CSharpier format |
 
 From the **repository root**:
 
@@ -61,86 +82,165 @@ npm run install:all
 
 Copy **`server/.env.example`** → **`server/.env`** and set **`GEMINI_API_KEY`**.
 
-**Run both apps:**
+**Run API + UI:**
 
 ```powershell
 npm run dev
 ```
 
-- UI: http://localhost:5173  
-- API: http://localhost:3001  
-- In dev, the UI calls **`/api/*`**, **`/chat`**, **`/run`** on the Vite origin; **`client/vite.config.js`** proxies those to Express.
+| Service | URL |
+|---------|-----|
+| UI | http://localhost:5173 |
+| API | http://localhost:3001 |
 
-**API only or UI only:**
+In development, the UI uses relative **`/api/*`**, **`/chat`**, **`/run`**, **`/format`**; Vite proxies them to Express (`client/vite.config.js`).
+
+**Run one side only:**
 
 ```powershell
 npm run dev:server
 npm run dev:client
 ```
 
+**Optional — install format/run tools on the machine that runs Express:**
+
+```powershell
+py -m pip install black
+dotnet tool install -g csharpier
+```
+
+Restart `npm run dev` after changing `server/.env`.
+
 ---
 
 ## 3. Configuration
 
-Set variables in **`server/.env`** or the process environment. **`server/index.js`** imports **`./env.js`** first so `.env` is loaded before other server modules (including run timeout).
+Variables live in **`server/.env`** or the process environment. **`server/env.js`** loads `.env` before other server modules (including timeout resolution).
+
+**Template (committed):** `server/.env.example` — never commit real secrets.
+
+### Server and chat
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PORT` | `3001` | API listen port |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | CORS allowed origin |
-| `GEMINI_API_KEY` | _(required for chat)_ | Gemini API key |
-| `RUN_VM_TIMEOUT_MS` | `5000` | **`environment: "js"`** on **`POST /run`** — wall-clock timeout (ms) for **`vm2`**, clamped **1–60000**; read when `runCode.js` loads (**restart** after change) |
-| `RUN_PYTHON_TIMEOUT_MS` | _(falls back to `RUN_VM_TIMEOUT_MS` / **5000**)_ | **`environment: "python"`** — subprocess wall-clock timeout (ms), clamped **1–60000** |
-| `RUN_CSHARP_TIMEOUT_MS` | _(falls back to `RUN_PYTHON_TIMEOUT_MS` then **5000**)_ | **`environment: "csharp"`** — **`dotnet run`** wall-clock timeout (ms), clamped **1–120000** |
-| `PYTHON_BIN` | `python` on Windows, `python3` elsewhere | **`environment: "python"`** — executable passed to **`spawnSync`** |
+| `GEMINI_API_KEY` | — | **Required** for `POST /chat` |
 
-**Tracked template:** `server/.env.example` (never commit real secrets).
+### Run timeouts (`POST /run`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `RUN_VM_TIMEOUT_MS` | `5000` | JavaScript (**vm2**), clamped **1–60000** |
+| `RUN_PYTHON_TIMEOUT_MS` | falls back to `RUN_VM_TIMEOUT_MS` | Python subprocess, clamped **1–60000** |
+| `RUN_CSHARP_TIMEOUT_MS` | falls back to `RUN_PYTHON_TIMEOUT_MS`, then **5000** | C# **`dotnet run`**, clamped **1–120000** |
+
+Restart the server after changing run timeouts (`runCode.js` reads `RUN_VM_TIMEOUT_MS` at module load; Python/C# read env per request).
+
+### Run executables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PYTHON_BIN` | `python` (Windows) / `python3` (elsewhere) | Python interpreter for Run |
+| `DOTNET_BIN` | `dotnet` | .NET SDK CLI for C# Run |
+| `DOTNET_TFM` | `net8.0` | Target framework in temp `RunSnippet.csproj` |
+
+### Format (`POST /format` and browser Prettier)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FORMAT_PYTHON_TIMEOUT_MS` | `15000` | Black subprocess, max **60000** |
+| `BLACK_BIN` | _(auto chain)_ | Override Black invocation (e.g. `py -m black`) |
+| `FORMAT_CSHARP_TIMEOUT_MS` | falls back to `FORMAT_PYTHON_TIMEOUT_MS` | CSharpier, max **60000** |
+| `CSHARPIER_BIN` | _(auto chain)_ | Override CSharpier (e.g. `dotnet csharpier format`) |
 
 ---
 
 ## 4. Using the application
 
-### 4.1 Workspace environments (JavaScript, Python, C#)
+### 4.1 Workspace environments
 
-Each language is configured in **`shared/workspaceEnvironments.js`** (extension, Monaco id, export folder, **Run** / **Format** flags).
+Languages are defined in **`shared/workspaceEnvironments.js`** (`WORKSPACE_ENVIRONMENTS`): extension, Monaco language id, export folder, **runSupported**, **formatSupported**, UI hints.
 
-- **JavaScript (`*.js`):** e.g. `main.js`, `untitled-1.js`. New files start empty. Rename uses a fixed **`.js`** suffix in the UI.
-- **Python (`*.py`):** e.g. `main.py`, `untitled-1.py`. Same rules with **`.py`**.
-- **C# (`*.cs`):** e.g. `main.cs`, `untitled-1.cs`. Monaco **csharp** highlighting; **Format** (CSharpier) and **Run** (`dotnet run` on a temp project). Source must be a **compilable program** (e.g. `class Program` with `Main`). Same explorer, AI, copy, export, and translate rules as other languages.
-- Workspaces **do not share** `files` or `activePath`. Switching the top bar swaps editor + explorer context. **Chat** threads reset when you switch (in-memory per visit).
-- **Delete:** You cannot delete the **last** file in an environment.
-- **Adding a language:** Add an entry to **`WORKSPACE_ENVIRONMENTS`** and default files in **`workspaceStorage.js`**; most UI and translate wiring follows the registry.
+| Environment | Extension | Run | Format |
+|-------------|-----------|-----|--------|
+| JavaScript (`js`) | `.js` | Server (**vm2**) | Browser (**Prettier**) |
+| Python (`python`) | `.py` | Server (subprocess) | Server (**Black**) |
+| C# (`csharp`) | `.cs` | Server (**`dotnet run`**) | Server (**CSharpier**) |
 
-### 4.2 Editor, export, and Run
+**Rules (all languages)**
 
-- Monaco language follows the **active environment** (JavaScript, Python, or C#). The editor header shows the active filename, language badge, **Copy code**, **Copy snippet**, **Format**, and **Run** (disabled when not supported for that language).
-- **Format document:** **`.js`** — **Prettier** in the browser (`client/src/formatJavaScript.js`). **`.py`** and **`.cs`** — **`POST /format`** with matching **`environment`**; the server runs **Black** or **CSharpier** on stdin. Formatted text replaces the active tab and is undoable.
-- **Export ZIP:** **Export ZIP** in the top bar saves both workspace slices (not only the active environment). Filenames are timestamped (`llm-workspace-YYYYMMDD-HHMM.zip`).
-- **Run** sends the active tab with matching **`environment`**. The Output header shows **Completed in … ms** or **Timed out at … ms**; errors get short labels (**Syntax error**, **Timeout**, etc.). JS: **`console.*`**; Python: **stdout** / **stderr**; C#: **stdout** plus build errors in **error**. ANSI stripped from **`output`** / **`error`** (see §4.5). C# is slower (compile per run).
+- Filenames are a **single basename** with the correct extension (no `/` or `\`).
+- **New files** start **empty** (no boilerplate comment injected).
+- **Rename** in the explorer keeps the environment’s extension suffix in the UI.
+- **Delete** is blocked for the **last** file in an environment.
+- Switching the top bar swaps editor + explorer; **chat threads reset** (in-memory per page visit).
+- **Adding a language:** register in `WORKSPACE_ENVIRONMENTS`, add defaults in `workspaceStorage.js`; translation targets and chat normalization follow the registry.
 
-### 4.3 AI chat and file proposals
+**C# Run note:** Source must be a **compilable console program** (e.g. `class Program` with `Main`). Each run creates a temp project, compiles, and runs—slower than JS/Python.
 
-- The chat panel has **Chat**, **Agent**, and **Translate** modes (toggle in the header). Every request includes **`mode`** and **`environment`** (source workspace: **`"js"`**, **`"python"`**, or **`"csharp"`**; must match the UI).
-- **Chat mode:** The server never parses or applies tool JSON; replies are natural language (Markdown allowed). The client ignores any **`toolCall`** unless **`mode`** and **`environment`** from the server match the request.
-- **Agent mode:** The model returns **`edit_file`** or **`create_file`** JSON with a filename valid for the **current** environment (e.g. **`.cs`** on C#). Valid payloads open **`AiEditPreviewModal`**. **Accept** updates only that environment’s `files` / `activePath`.
-- **Translate mode:** Ports the **active file** to another registered language. The **To** switch lists only **other** languages (e.g. JS → Python or C#). Output names use a **`_converted`** suffix (e.g. `main.js` → `main_converted.cs`). **Accept** writes to the target workspace and switches the top bar there.
-- **Adding languages later:** Register entries in **`shared/workspaceEnvironments.js`**; translation targets, filename rules, and chat Agent/Translate prompts follow via **`normalizeWorkspaceEnvironment`** (server + client).
-- Composer sends **`message`**, **`files`**, **`currentFile`**, **`mode`**, and **`environment`** to **`POST /chat`** (plus translate fields when applicable). A small footer above the composer shows **which model answered** the last reply, highlights it in the fallback chain, and marks **fallback** when a later model was used after an earlier failure.
+### 4.2 Editor, Run, Format, export
+
+- **Monaco** language follows the active environment.
+- **Format** — enabled only on a valid active file for that environment. JS formats in-browser; `.py` / `.cs` call `POST /format`. Result replaces the tab and is undoable.
+- **Run** — same file gating. Output panel shows duration, **Timeout** / error labels, stdout vs stderr-style **error** text. ANSI escape sequences are stripped server-side.
+- **Export ZIP** — timestamped archive (`llm-workspace-YYYYMMDD-HHMM.zip`) with **all** environments, not only the active one.
+
+### 4.3 AI chat (Chat, Agent, Translate)
+
+**Modes**
+
+| Mode | Server behavior | Client behavior |
+|------|-----------------|-----------------|
+| **Chat** | Natural language only; no tool JSON parsing | Ignores `toolCall` unless mode/env mismatch |
+| **Agent** | Expects one `edit_file` or `create_file` JSON for **current** `environment` | Opens **AiEditPreviewModal** on valid tool + matching `environment` |
+| **Translate** | Ports active file to **`targetEnvironment`**; tool JSON validated against **target** ext | **To** switch lists other registry languages; **Accept** writes target slice and can switch workspace |
+
+**Request fields (typical):** `message`, `files`, `currentFile`, `mode`, `environment`. Translate adds `targetEnvironment`, `targetFiles`, `expectedFilename` (optional; default `*_converted` + target ext with numeric suffix on collision).
+
+**Response metadata:** `model`, `modelFallback`, `modelChain` — shown in the chat footer (highlights which model answered and whether fallback was used).
+
+**Environment IDs** in API bodies: `js`, `python`, `csharp` (aliases like `javascript` or `c#` normalize on the server). **`environment` must match the UI** for Agent tools to apply.
+
+```mermaid
+sequenceDiagram
+  participant UI as ChatPanel
+  participant Vite as Vite dev server
+  participant API as Express /chat
+  participant Gemini as Gemini API
+  UI->>Vite: POST /chat (mode + environment + files)
+  Vite->>API: proxy :3001/chat
+  API->>Gemini: generateContent (prompt per mode/env)
+  Gemini-->>API: text
+  API-->>UI: response, toolCall, mode, environment, model*
+  UI->>UI: preview diff → accept or reject
+```
+
+### 4.4 Workspace state (reference)
+
+| Topic | Detail |
+|-------|--------|
+| In-memory shape | `dualWorkspace`: `{ environment, js, python, csharp, … }` |
+| Storage key | `llm:dualWorkspace:v1` via `workspaceStorage.js` |
+| Migration | `llm:workspace:v1` → JS slice; missing env slices get defaults |
+| Create file | Next free `untitled-N` + extension |
+| Editor remount | `CodeEditor` `key` includes `environment` |
+| Validation | `shared/workspaceFilename.js` + per-app wrappers |
 
 ### 4.5 Testing Run output (ANSI cleanup)
 
-**Automated (server):**
+**Automated (from `server/`):**
 
 ```powershell
-cd server
 npm run test:strip-ansi
 npm run test:run-error-kind
 npm run test:run-csharp
+npm run test:workspace-env
 ```
 
-**Manual in the UI (Python — typical colored tracebacks):**
+**Manual — Python colored traceback**
 
-1. Switch to **Python**, open `main.py`, paste and **Run**:
+1. Python workspace, `main.py`, **Run**:
 
 ```python
 def dangerous_recursion(n=0):
@@ -149,99 +249,66 @@ def dangerous_recursion(n=0):
 dangerous_recursion()
 ```
 
-2. **Expect:** Output **error** shows a normal traceback (`File "<stdin>"`, `RecursionError`, …) with **no** `[35m`, `[0m`, or other escape junk.
+2. Expect a readable traceback **without** `[35m` / `[0m` junk in the UI.
 
-**Manual (Python — explicit ANSI in print):**
-
-```python
-print("\033[31mred\033[0m plain")
-raise RuntimeError("after color")
-```
-
-3. **Expect:** `red plain` in **output** (or error text without raw `\033` sequences).
-
-**Manual (API with curl / Invoke-RestMethod):**
+**Manual — API**
 
 ```powershell
 $body = @{ code = "print(chr(27)+'[31mhi'+chr(27)+'[0m')"; environment = "python" } | ConvertTo-Json
 Invoke-RestMethod -Uri http://localhost:3001/run -Method POST -ContentType "application/json" -Body $body
 ```
 
-4. **Expect:** JSON **`output`** is `hi` (or `hi` plus newline), not containing `[31m`.
-
-**JavaScript:** vm2 errors rarely include ANSI; run `throw new Error("fail")` and confirm the message displays normally.
-
-### 4.4 Workspace state (reference)
-
-| Topic | Behavior |
-|-------|----------|
-| Storage | `App.jsx` holds **`dualWorkspace`** `{ environment, js, python, csharp, … }` slices; persisted via **`workspaceStorage.js`** key **`llm:dualWorkspace:v1`**. |
-| Migrate | Legacy **`llm:workspace:v1`** hydrates **JS**; missing slices (e.g. **csharp**) get defaults on load. |
-| Create | Next free `untitled-N` + extension per **`environment`**. |
-| Select | Sets **`activePath`** inside the active slice only. |
-| Delete | Confirm → remove key (not the last file); pick next active; bump `editorNonce` if needed. |
-| Rename | **`workspaceFileValidation.js`** + **`shared/workspaceFilename.js`** enforce the correct extension per environment. |
-| Editor | `CodeEditor` **`key`** includes **`environment`** so Monaco remounts on environment switch. |
-| Undo / redo | Max **40** snapshots **per environment**; each snapshot is `{ files, activePath }` for that slice only. |
-
-Chat request flow:
-
-```mermaid
-sequenceDiagram
-  participant UI as ChatPanel
-  participant Vite as Vite dev server
-  participant API as Express /chat
-  participant Gemini as Gemini API
-  UI->>Vite: POST /chat (body includes mode + environment)
-  Vite->>API: proxy :3001/chat
-  API->>Gemini: generateContent (prompt per mode + environment)
-  Gemini-->>API: text
-  API-->>UI: 200 response + toolCall + mode + environment
-  UI->>UI: diff modal then merge or reject
-```
+Expect `"output"` containing `hi`, not raw escape sequences.
 
 ---
 
 ## 5. API reference
 
+Base URL in dev (proxied): `http://localhost:5173` — same paths on `http://localhost:3001` when calling Express directly.
+
 ### 5.1 Route index
 
-| Method | Path | Success body (shape) |
-|--------|------|----------------------|
+| Method | Path | Success body (summary) |
+|--------|------|-------------------------|
 | GET | `/api/health` | `{ ok, service, timestamp }` |
 | GET | `/api/hello` | `{ message }` |
-| POST | `/chat` | `{ response, toolCall, mode, environment, model, modelFallback, modelChain }` — see §5.2 |
-| POST | `/run` | `{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }` — see §5.4 |
-| POST | `/format` | `{ code, error }` — **Black** (python) or **CSharpier** (csharp); JS is formatted in the browser |
+| POST | `/chat` | `{ response, toolCall, mode, environment, model, modelFallback, modelChain, … }` |
+| POST | `/run` | `{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }` |
+| POST | `/format` | `{ code, error }` — Python / C# only (JS → 400) |
+
+Unknown routes: **404** `{ error: "Not found" }`.
 
 ### 5.2 `POST /chat`
 
-- **URLs:** `http://localhost:5173/chat` (proxied) or `http://localhost:3001/chat`
 - **Headers:** `Content-Type: application/json` (body limit **4 MB**)
-- **Body:** `message` (string, required for **chat** / **agent**; optional for **translate** — default prompt used if empty). Optional **`files`** (≤200 keys), **`currentFile`** (string \| null), **`mode`** (`"chat"` \| `"agent"` \| `"translate"`, default **`"chat"`**), **`environment`** (`"js"` \| `"python"`, default **`"js"`** — **source** workspace). **Translate only:** **`targetEnvironment`** (must differ from **`environment`**), **`targetFiles`** (object of existing target paths), **`expectedFilename`** (optional; default `basename_converted` + target ext, with numeric suffix on collision). Keys in **`files`** / **`currentFile`** use the **source** extension; **`targetFiles`** keys use the **target** extension.
-- **200:** `response`, `toolCall`, **`mode`**, **`environment`**, and for **translate** also **`targetEnvironment`**, **`expectedFilename`**. Also **`model`**, **`modelFallback`**, **`modelChain`**.
-- **Chat mode:** The server does not run structured-output parsing for tools; the model is instructed not to emit **`edit_file`** / **`create_file`** JSON.
-- **Agent mode:** The server parses model text with `assistantOutput.js` against **`environment`**; a reply without a valid tool payload is an error (**502**).
-- **Translate mode:** Parses tool JSON against **`targetEnvironment`**; **`filename`** must match **`expectedFilename`**. Requires **`currentFile`** in the source workspace.
-- **Errors:** JSON with `error` and usually `detail`; typical statuses **400**, **401/403**, **429**, **500**, **502** (see prior README behavior — missing key, rate limits, upstream failures).
+- **Body**
+  - **`message`** — required for **chat** / **agent**; optional for **translate** (default prompt if empty)
+  - **`files`** — optional object, ≤ **200** keys, values strings (empty allowed)
+  - **`currentFile`** — optional string or null (active editor path)
+  - **`mode`** — `"chat"` \| `"agent"` \| `"translate"` (default `"chat"`)
+  - **`environment`** — `"js"` \| `"python"` \| `"csharp"` (default `"js"`); **source** workspace for translate
+  - **Translate only:** `targetEnvironment`, `targetFiles`, `expectedFilename`
+- **Paths:** keys must match the workspace extension for that environment (e.g. `*.cs` when `environment` is `csharp`).
+- **200:** `response`, `toolCall` (null in chat), `mode`, `environment`; translate also returns `targetEnvironment`, `expectedFilename`; plus `model`, `modelFallback`, `modelChain`.
+- **Errors:** JSON `{ error, detail? }` — **400** validation, **500** config, **502** Gemini / agent parse failures, etc.
 
 ### 5.3 `POST /format`
 
-- **URLs:** `http://localhost:5173/format` (proxied) or `http://localhost:3001/format`
-- **Body:** **`code`** (string, required). **`environment`**: **`"python"`** (Black) or **`"csharp"`** (CSharpier). **`"js"`** returns **400** (Prettier in the browser). Legacy **`runtime`** is accepted like **`POST /run`**. Same max length as Run (**`MAX_RUN_CODE_CHARS`**).
-- **200:** **`{ code, error }`**. On success **`error`** is empty and **`code`** is the formatted source. On formatter failure **`code`** may be empty and **`error`** explains (e.g. tool not installed, syntax error).
-- **Python — Black:** [Black](https://black.readthedocs.io/) on the server host — e.g. **`py -m pip install black`**. Fallback chain: **`black`**, **`PYTHON_BIN -m black`**, **`py -m black`**. **`BLACK_BIN`**, **`FORMAT_PYTHON_TIMEOUT_MS`** (default **15000**, max **60000**).
-- **C# — CSharpier:** [.NET SDK](https://dotnet.microsoft.com/download) + **`dotnet tool install -g csharpier`**. Server writes a temp **`.cs`** file and runs **`csharpier format <path>`** (in-place). Tries **`csharpier`**, then **`dotnet csharpier`**, then **`dotnet tool run csharpier`** (Windows). **`CSHARPIER_BIN`**, **`FORMAT_CSHARP_TIMEOUT_MS`** (falls back to **`FORMAT_PYTHON_TIMEOUT_MS`**).
+- **Body:** **`code`** (string, required, max **`MAX_RUN_CODE_CHARS`** = **500 000**)
+- **`environment`:** `"python"` (Black) or `"csharp"` (CSharpier). **`"js"`** → **400** (use Prettier in the UI). Legacy **`runtime`** accepted (same as `/run`).
+- **200:** `{ code, error }` — on success `error` is empty.
+- **Python:** [Black](https://black.readthedocs.io/) via stdin; install e.g. `py -m pip install black`. Fallback: `black`, `PYTHON_BIN -m black`, `py -m black`.
+- **C#:** temp dir `llm-csharpier-*`, format in place, **removed in `finally`**. Fallback: `csharpier`, `dotnet csharpier`, `dotnet tool run csharpier`.
 
 ### 5.4 `POST /run`
 
-- **URLs:** `http://localhost:5173/run` (proxied) or `http://localhost:3001/run`
-- **Body:** **`code`** (string, required). Optional **`environment`**: **`"js"`** \| **`"python"`** \| **`"csharp"`** (default **`"js"`**). Legacy **`runtime`** is accepted. Max **`MAX_RUN_CODE_CHARS`** applies to **`code`**.
-- **200:** **`{ output, error, durationMs, timeoutMs, runStatus, errorKind, errorLabel }`**. **`output`** and **`error`** are passed through **`stripAnsi`**. **`timeoutMs`**: **`RUN_VM_TIMEOUT_MS`** (JS, default **5000**), **`RUN_PYTHON_TIMEOUT_MS`** (Python), **`RUN_CSHARP_TIMEOUT_MS`** (C#). **`errorLabel`** buckets include **Syntax error** (e.g. C# **CS####** build errors).
-- **`environment: "js"`** (default): **`executeJavaScript`** — **`vm2`** sandbox.
-- **`environment: "python"`**: **`executePython`** — Python subprocess on stdin.
-- **`environment: "csharp"`**: **`executeCsharp`** — temp **`RunSnippet.csproj`** + **`Program.cs`**, then **`dotnet run`**. Requires a compilable console program. **`DOTNET_TFM`** (default **`net8.0`**), **`DOTNET_BIN`**, **`RUN_CSHARP_TIMEOUT_MS`**.
-- **400 / 500:** Same JSON shapes; **400** if **`runSupported`** is false for that language.
+- **Body:** **`code`** (string, required, max **500 000** chars). **`environment`:** `js` \| `python` \| `csharp` (default `js`). Legacy **`runtime`** accepted.
+- **200:** `output`, `error`, `durationMs`, `timeoutMs`, `runStatus` (`ok` \| `error` \| `timeout`), `errorKind`, `errorLabel`.
+- **Executors**
+  - **`js`:** `vm2` — stub `console` only; `eval` / `wasm` / async disabled.
+  - **`python`:** `python -I -u -` (stdin script).
+  - **`csharp`:** temp dir `llm-csharp-run-*` with `Program.cs` + `RunSnippet.csproj`, then `dotnet run`; temp dir **deleted in `finally`**.
+- **400** if `runSupported` is false for that registry entry.
 
 ---
 
@@ -249,44 +316,44 @@ sequenceDiagram
 
 ```
 .
-├── agent-memory.md       # Append-only implementation changelog (see top of README)
-├── package.json
+├── agent-memory.md              # Implementation changelog (append-only)
+├── package.json                 # Root scripts: dev, build, install:all
 ├── README.md
 ├── shared/
-│   ├── workspaceEnvironments.js   # Language registry (js, python, csharp, …)
-│   └── workspaceFilename.js         # Generic *.ext validation
+│   ├── workspaceEnvironments.js # Language registry + translate helpers
+│   ├── workspaceEnvironments.types.js
+│   └── workspaceFilename.js     # Extension-aware filename rules
 ├── server/
-│   ├── index.js
-│   ├── env.js
-│   ├── chatBody.js
-│   ├── assistantOutput.js
-│   ├── workspaceFilename.js
+│   ├── index.js                 # Express routes
+│   ├── env.js                   # dotenv load
+│   ├── chatBody.js              # mode/env normalization, files parsing
+│   ├── assistantOutput.js       # Agent/translate tool JSON parse
 │   ├── workspaceFileValidation.js
-│   ├── runCode.js
+│   ├── runCode.js               # JS vm2 + DEFAULT_RUN_TIMEOUT_MS
 │   ├── runPython.js
 │   ├── runCsharp.js
+│   ├── runMeta.js               # errorKind / runStatus / timeoutMs in response
 │   ├── formatPython.js
 │   ├── formatCsharp.js
-│   ├── runMeta.js
 │   ├── stripAnsi.js
 │   ├── scripts/
-│   │   └── test-strip-ansi.mjs
+│   │   ├── test-strip-ansi.mjs
+│   │   ├── test-run-error-kind.mjs
+│   │   ├── test-run-csharp.mjs
+│   │   └── test-workspace-env.mjs
 │   ├── .env.example
 │   └── services/
 │       └── geminiService.js
 └── client/
-    ├── vite.config.js
-    ├── index.html
-    ├── public/favicon.svg
+    ├── vite.config.js           # @shared alias, Monaco plugin, API proxy
     └── src/
-        ├── main.jsx
-        ├── App.jsx
-        ├── App.css
-        ├── index.css
-        ├── workspaceFilename.js
-        ├── workspaceFileValidation.js
+        ├── App.jsx              # Workspaces, Run/Format, AI merge, theme
         ├── workspaceStorage.js
         ├── formatJavaScript.js
+        ├── exportWorkspaceZip.js
+        ├── theme.js
+        ├── workspaceSnippet.js
+        ├── copyToClipboard.js
         └── components/
             ├── FileExplorer.jsx
             ├── CodeEditor.jsx
@@ -294,96 +361,81 @@ sequenceDiagram
             └── AiEditPreviewModal.jsx
 ```
 
-**Key client files**
-
-| File | Role |
-|------|------|
-| `App.jsx` | Multi **`environment`**, workspace slices, per-env undo/redo, Run/Format/output, AI diff + toast, theme toggle |
-| `formatJavaScript.js` | Prettier format for **`.js`** in the browser |
-| `theme.js` | **`loadTheme`** / **`persistTheme`** / **`applyTheme`**; key **`llm:theme:v1`** |
-| `workspaceSnippet.js` | **`formatGistSnippet`** — Markdown gist blocks for clipboard |
-| `exportWorkspaceZip.js` | **`downloadDualWorkspaceZip`** — browser ZIP via **`jszip`** |
-| `copyToClipboard.js` | **`copyTextToClipboard`** |
-| `workspaceFilename.js` / `workspaceFileValidation.js` | Path policy and validators |
-| `workspaceStorage.js` | Dual-workspace **`localStorage`** (`llm:dualWorkspace:v1`), legacy **`llm:workspace:v1`** migration |
-| `FileExplorer.jsx` | List, new file, rename (**.js** / **.py** suffix UI per environment), delete |
-| `CodeEditor.jsx` | Monaco; **`key`** includes **`environment`** |
-| `ChatPanel.jsx` | Thread + `POST /chat` (Chat / Agent / Translate); **To** language switch in Translate; footer shows **`model`** / **`modelChain`** |
-| `shared/workspaceEnvironments.js` | Language registry, translation targets, **`buildConvertedFilename`** |
-| `AiEditPreviewModal.jsx` | Diff editor + accept/reject |
-
-**Notable client deps:** `lucide-react`, `@monaco-editor/react`, `monaco-editor`, `vite-plugin-monaco-editor` (Monaco workers; use `default` export interop in `vite.config.js`).
+**Client ↔ server shared code:** `shared/` is imported as `@shared` in the client (Vite alias) and via relative paths in the server.
 
 ---
 
-## 7. Build and deployment notes
-
-**Client build (from `client/` or root per your scripts):**
+## 7. Build and deployment
 
 ```powershell
-npm run build
+npm run build          # client → client/dist/
+npm start              # server only (root script → server/index.js)
 ```
 
-Output: **`client/dist/`**, including **`monacoeditorwork/`** for workers — deploy with same relative URL layout as `index.html`.
+- **Monaco workers:** production build includes `monacoeditorwork/` under `dist/` — deploy with the same relative paths as `index.html`.
+- **Static UI:** Express does **not** serve `client/dist` in this repo; use Vite preview, a static host, or add static middleware yourself.
+- **Proxies:** Any static host must forward **`/chat`**, **`/run`**, **`/format`**, **`/api`** to the API (or change the client to absolute API URLs).
 
-**API production:** `npm start` in `server/` runs `index.js` (no watch). Serving **`client/dist`** from Express is **not** wired in this repo yet.
-
-**Vite preview / static hosting:** Proxy **`/chat`** and **`/run`** to the API, or use absolute API URLs — the client uses relative **`/chat`** and **`/run`**.
-
-**Layout tokens:** Explorer width `--width-explorer` (244px), chat `--width-chat` (384px). **Accessibility:** chat log `role="log"`, `aria-live="polite"`; hidden label on chat input.
+**UI tokens:** Explorer `--width-explorer` (244px), chat `--width-chat` (384px). Chat log: `role="log"`, `aria-live="polite"`.
 
 ---
 
 ## 8. Security and limitations
 
-- **`vm2` is unmaintained**; sandbox settings reduce accidental Node access and dynamic code paths but are **not** a guarantee against determined attackers. Use separate processes/containers for hostile or production execution.
-- **Python `POST /run`** uses a normal OS subprocess with **`-I`** (no user **`site-packages`**) but **full CPython** still has **`import os`**, sockets, and file access unless you add OS-level containment. **Do not** expose this endpoint to untrusted networks without additional hardening.
-- **Workspace data** in the browser is stored in **`localStorage`** (same-origin); treat tab contents as sensitive if you paste secrets. **Reset** or private browsing limits retention; there is no server-side file store unless you add one.
-- **Gemini** key must stay out of git; use **`server/.env`**.
+| Runtime | Isolation | Timeout (default) | Notes |
+|---------|-----------|-------------------|--------|
+| **JavaScript** | **vm2** sandbox (unmaintained package) | **5 s** | No Node `require` / `fs` in sandbox; not safe against determined escape |
+| **Python** | OS subprocess, `-I` | **5 s** | Full CPython—`import os`, network, files possible |
+| **C#** | OS subprocess (`dotnet run`) | **5 s** | Full .NET—filesystem, network, etc. |
+
+**Do not** expose `POST /run` or `POST /format` to untrusted users on the public internet without containers, separate users, or stronger sandboxes.
+
+**Temp directories:** C# Run (`llm-csharp-run-*`) and C# Format (`llm-csharpier-*`) are created under the OS temp folder and removed after each request in a `finally` block. Leftovers are possible only if the server process is killed mid-request or deletion fails.
+
+**Secrets:** Keep **`GEMINI_API_KEY`** in `server/.env` (gitignored).
+
+**Browser data:** Workspace content is in **`localStorage`** (same-origin). No server-side file store unless you add one.
 
 ---
 
 ## 9. Troubleshooting
 
-| Symptom | Likely cause |
+| Symptom | What to check |
 |---------|----------------|
-| “Could not reach API” / fetch errors | API down or wrong port / proxy |
-| CORS errors | `CLIENT_ORIGIN` mismatch with actual UI origin |
-| `npm run dev` fails | Run `npm run install:all` from root |
-| `POST /chat` 500 “Server configuration” | Missing `GEMINI_API_KEY` |
-| `POST /chat` 401/403 | Bad or disabled API key |
-| `POST /chat` 400 “files” | Invalid `files` / `currentFile` or non-`*.js` keys |
-| `POST /chat` 502 / “Agent mode: expected…” | **Agent** mode: model output was not exactly one valid **`edit_file`** / **`create_file`** JSON object |
-| `POST /run` 400 | Bad **`code`** type, over max length, or malformed JSON |
-| `POST /run` timeout / killed | Output shows **Timed out at N ms** and **Timeout** label. **JS:** raise **`RUN_VM_TIMEOUT_MS`** and restart server. **Python:** **`RUN_PYTHON_TIMEOUT_MS`**. |
-| `POST /run` async / eval issues (**JS** only) | **`allowAsync: false`**, **`eval: false`** — use simple synchronous scripts |
-| `POST /run` “Python not found” | **Python** runtime: interpreter missing or wrong **`PYTHON_BIN`** |
-| Format toast “Black not found” | On the server host: `py -m pip install black` (or `pip install black`). Restart **`npm run dev`**. Optional **`BLACK_BIN=py -m black`** in **`server/.env`** |
-| Format toast “CSharpier is not available” | Install [.NET SDK](https://dotnet.microsoft.com/download), then `dotnet tool install -g csharpier`. Restart **`npm run dev`**. Optional **`CSHARPIER_BIN`** in **`server/.env`** |
-| C# Run slow or times out | Normal (compile each run). Raise **`RUN_CSHARP_TIMEOUT_MS`** (e.g. **60000**) in **`server/.env`**. Ensure **`Program.cs`** is a valid console app with **`Main`**. |
-| C# Run “dotnet not found” | Install [.NET SDK](https://dotnet.microsoft.com/download). Restart **`npm run dev`**. Optional **`DOTNET_BIN`** |
-| Run disabled | No active `.js` tab |
-| Rename blocked | Invalid base name, separators, or duplicate after normalization |
-| Output “gone” | Output panel minimized — expand via chevron or Run |
-| Monaco workers 404 in prod | Ship `monacoeditorwork` with `dist` |
-| Workspace not restored after refresh | Corrupt or cleared `localStorage`, private mode, or quota — falls back to defaults; use **Reset** to force defaults |
-| Files “missing” after refresh | Rare parse/validation failure on stored JSON — defaults apply; check browser storage for key `llm:workspace:v1` |
+| “Could not reach API” / fetch failed | API running on **3001**; dev proxy in `vite.config.js` |
+| CORS errors | `CLIENT_ORIGIN` matches the UI origin |
+| `npm run dev` fails | `npm run install:all` from repo root |
+| Chat 500 “Server configuration” | `GEMINI_API_KEY` in `server/.env` |
+| Chat 401 / 403 | Invalid or disabled API key |
+| Chat 400 on `files` | Paths must match environment extension (`*.js` / `*.py` / `*.cs`) |
+| Chat 502 “Agent mode: expected…” | Model did not return exactly one valid tool JSON object |
+| Translate 400 | Set `currentFile`; valid `targetEnvironment`; collision rules for `expectedFilename` |
+| Run 400 | Bad `code` type, over 500k chars, or `runSupported: false` |
+| Run **Timeout** (5 s default) | Raise `RUN_VM_TIMEOUT_MS` / `RUN_PYTHON_TIMEOUT_MS` / `RUN_CSHARP_TIMEOUT_MS`; restart server. C# often needs more time for compile. |
+| Run “Python not found” | Install Python 3; set `PYTHON_BIN` |
+| Run “dotnet not found” | Install [.NET SDK](https://dotnet.microsoft.com/download); `DOTNET_BIN` |
+| Format “Black not found” | `py -m pip install black`; optional `BLACK_BIN` |
+| Format “CSharpier is not available” | `dotnet tool install -g csharpier`; optional `CSHARPIER_BIN` |
+| Run / Format disabled | Open a file with the correct extension for that environment |
+| Agent diff never opens | Server `environment` must match UI; check console/network for 502 |
+| Output panel empty | Panel may be minimized—expand with chevron |
+| Monaco 404 in production | Ship `dist/monacoeditorwork/` with `index.html` |
+| Workspace reset after refresh | Cleared `localStorage`, private mode, or corrupt JSON—defaults apply |
 
 ---
 
-## 10. For contributors and AI assistants
+## 10. Contributors and AI assistants
 
-When requesting changes, specify: **which side** (`server` / `client` / both), **goal**, **API contract** (method, path, body, responses), **env** and secrets handling, **ports** (align CORS + Vite proxy), and any **Gemini** / **Monaco** constraints.
+When requesting changes, specify: **server / client / shared**, **goal**, **API contract**, **env vars**, **ports** (CORS + Vite proxy), and **Gemini / Monaco** constraints.
 
-**Touch points by feature**
-
-| Area | Typical files |
-|------|----------------|
+| Feature | Primary files |
+|---------|----------------|
+| Language registry | `shared/workspaceEnvironments.js`, `workspaceStorage.js` |
 | Chat / Gemini | `server/services/geminiService.js`, `assistantOutput.js`, `chatBody.js`, `ChatPanel.jsx`, `App.jsx` |
-| Workspace paths / validation | `workspaceFilename.js`, `workspaceFileValidation.js` (client + server), `FileExplorer.jsx`, `App.jsx` |
-| Browser workspace persistence | `workspaceStorage.js`, `App.jsx` (persist effect, **Reset**), `App.css` (reset button) |
-| Run (JS + Python) | `server/runCode.js`, `server/runPython.js`, `server/runMeta.js`, `server/stripAnsi.js`, `server/index.js`, `client/vite.config.js`, `App.jsx`, `App.css` |
-| Format (Prettier + Black + CSharpier) | `client/src/formatJavaScript.js`, `server/formatPython.js`, `server/formatCsharp.js`, `server/index.js` (`POST /format`), `App.jsx`, `vite.config.js` |
-| UI / Monaco | `App.css`, `index.css`, `CodeEditor.jsx`, `vite.config.js`, `index.html`, `public/favicon.svg` |
+| Agent / translate UI | `AiEditPreviewModal.jsx`, `ChatPanel.jsx` |
+| Run | `runCode.js`, `runPython.js`, `runCsharp.js`, `runMeta.js`, `index.js`, `App.jsx` |
+| Format | `formatJavaScript.js`, `formatPython.js`, `formatCsharp.js`, `index.js`, `App.jsx` |
+| Persistence / export | `workspaceStorage.js`, `exportWorkspaceZip.js`, `App.jsx` |
+| Paths / validation | `shared/workspaceFilename.js`, `workspaceFileValidation.js` (client + server) |
 
-Record **factual implementation changes** in [`agent-memory.md`](./agent-memory.md) (append-only).
+After code changes, append facts to [`agent-memory.md`](./agent-memory.md).
